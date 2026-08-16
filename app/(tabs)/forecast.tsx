@@ -20,29 +20,39 @@ export default function ForecastScreen() {
   const [insight, setInsight] = useState<ForecastInsight | null>(null);
   const [budgets, setBudgetsState] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
       async function load() {
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+        try {
+          setHasError(false);
+          const now = new Date();
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+          const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
 
-        const [records, budgetData, merchants] = await Promise.all([
-          getAllItemSpend(db),
-          getBudgets(db),
-          getTopMerchantsThisMonth(db, monthStart, monthEnd),
-        ]);
+          const [records, budgetData, merchants] = await Promise.all([
+            getAllItemSpend(db),
+            getBudgets(db),
+            getTopMerchantsThisMonth(db, monthStart, monthEnd),
+          ]);
 
-        const result = calculateForecast(records);
-        const trend = findBiggestTrendShift(records);
-        if (isActive) {
-          setForecasts(result);
-          setTopMerchants(merchants);
-          setInsight(trend);
-          setBudgetsState(budgetData);
-          setIsLoading(false);
+          const result = calculateForecast(records);
+          const trend = findBiggestTrendShift(records);
+          if (isActive) {
+            setForecasts(result);
+            setTopMerchants(merchants);
+            setInsight(trend);
+            setBudgetsState(budgetData);
+            setIsLoading(false);
+          }
+        } catch (err) {
+          console.error('[ForecastScreen] load error:', err);
+          if (isActive) {
+            setIsLoading(false);
+            setHasError(true);
+          }
         }
       }
       load();
@@ -51,6 +61,20 @@ export default function ForecastScreen() {
       };
     }, [db])
   );
+
+  if (hasError) {
+    return (
+      <View style={styles.flex}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+        <StateView
+          icon="alert-circle-outline"
+          iconTone="error"
+          title="Could not load data"
+          subtitle="Something went wrong. Pull to refresh or restart the app."
+        />
+      </View>
+    );
+  }
 
   if (!isLoading && forecasts.length === 0) {
     return (

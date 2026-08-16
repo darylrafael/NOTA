@@ -7,6 +7,7 @@ import { getMerchantReceipts, MerchantReceiptDetail } from '../../db/queries';
 import { formatRupiah, toTitleCase } from '../../lib/format';
 import { getCategoryMeta } from '../../constants/categories';
 import { colors, spacing, radius } from '../../constants/theme';
+import StateView from '../../components/StateView';
 
 export default function MerchantDetailScreen() {
   const { name } = useLocalSearchParams<{ name: string }>();
@@ -14,6 +15,7 @@ export default function MerchantDetailScreen() {
   const router = useRouter();
   const [receipts, setReceipts] = useState<MerchantReceiptDetail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   const merchantName = name ? decodeURIComponent(name) : 'Store Details';
 
@@ -22,10 +24,19 @@ export default function MerchantDetailScreen() {
       let isActive = true;
       async function load() {
         if (!name) return;
-        const data = await getMerchantReceipts(db, merchantName);
-        if (isActive) {
-          setReceipts(data);
-          setIsLoading(false);
+        try {
+          setHasError(false);
+          const data = await getMerchantReceipts(db, merchantName);
+          if (isActive) {
+            setReceipts(data);
+            setIsLoading(false);
+          }
+        } catch (err) {
+          console.error('[MerchantDetailScreen] load error:', err);
+          if (isActive) {
+            setIsLoading(false);
+            setHasError(true);
+          }
         }
       }
       load();
@@ -37,6 +48,20 @@ export default function MerchantDetailScreen() {
 
   const totalSpent = receipts.reduce((sum, r) => sum + r.totalAmount, 0);
   const totalItemsCount = receipts.reduce((sum, r) => sum + r.items.length, 0);
+
+  if (hasError) {
+    return (
+      <View style={styles.flex}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+        <StateView
+          icon="alert-circle-outline"
+          iconTone="error"
+          title="Could not load data"
+          subtitle="Something went wrong. Pull to refresh or restart the app."
+        />
+      </View>
+    );
+  }
 
   if (isLoading) {
     return (

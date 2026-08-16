@@ -6,6 +6,7 @@ import { getItemsByCategory, CategoryItemDetail } from '../../db/queries';
 import { getCategoryMeta } from '../../constants/categories';
 import { formatRupiah, toTitleCase } from '../../lib/format';
 import { colors, spacing, radius } from '../../constants/theme';
+import StateView from '../../components/StateView';
 
 export default function CategoryDetailScreen() {
   const { name } = useLocalSearchParams<{ name: string }>();
@@ -13,19 +14,29 @@ export default function CategoryDetailScreen() {
   const [items, setItems] = useState<CategoryItemDetail[]>([]);
   const [selectedMerchant, setSelectedMerchant] = useState<string>('All');
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
       async function load() {
         if (!name) return;
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
-        const data = await getItemsByCategory(db, name, monthStart, monthEnd);
-        if (isActive) {
-          setItems(data);
-          setIsLoading(false);
+        try {
+          setHasError(false);
+          const now = new Date();
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+          const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+          const data = await getItemsByCategory(db, name, monthStart, monthEnd);
+          if (isActive) {
+            setItems(data);
+            setIsLoading(false);
+          }
+        } catch (err) {
+          console.error('[CategoryDetailScreen] load error:', err);
+          if (isActive) {
+            setIsLoading(false);
+            setHasError(true);
+          }
         }
       }
       load();
@@ -62,6 +73,20 @@ export default function CategoryDetailScreen() {
   const filteredTotal = useMemo(() => {
     return filteredItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   }, [filteredItems]);
+
+  if (hasError) {
+    return (
+      <View style={styles.flex}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+        <StateView
+          icon="alert-circle-outline"
+          iconTone="error"
+          title="Could not load data"
+          subtitle="Something went wrong. Pull to refresh or restart the app."
+        />
+      </View>
+    );
+  }
 
   if (isLoading) {
     return (

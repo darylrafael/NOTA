@@ -125,15 +125,6 @@ export async function getAllItemSpend(db: SQLite.SQLiteDatabase): Promise<ItemSp
   return rows;
 }
 
-export interface CategoryItemDetail {
-  id: string;
-  name: string;
-  price: number;
-  quantity: number;
-  purchaseDate: string;
-  merchantName: string | null;
-}
-
 export async function getItemsByCategory(
   db: SQLite.SQLiteDatabase,
   category: string,
@@ -224,44 +215,66 @@ export async function getMerchantReceipts(
 ): Promise<MerchantReceiptDetail[]> {
   const isUnknown = merchantName === 'Unknown Store' || merchantName === '';
   const filter = isUnknown
-    ? `(merchant_name IS NULL OR TRIM(merchant_name) = '' OR merchant_name = 'Unknown Store')`
-    : `TRIM(merchant_name) = ?`;
+    ? `(r.merchant_name IS NULL OR TRIM(r.merchant_name) = '' OR r.merchant_name = 'Unknown Store')`
+    : `TRIM(r.merchant_name) = ?`;
   const params = isUnknown ? [] : [merchantName.trim()];
 
-  const receipts = await db.getAllAsync<{
-    id: string;
+  const rows = await db.getAllAsync<{
+    receipt_id: string;
     purchase_date: string;
     total_amount: number;
     tax: number | null;
     service_charge: number | null;
+    item_id: string | null;
+    item_name: string | null;
+    item_price: number | null;
+    item_quantity: number | null;
+    item_category: string | null;
   }>(
-    `SELECT id, purchase_date, total_amount, tax, service_charge
-     FROM receipts
+    `SELECT 
+       r.id as receipt_id, 
+       r.purchase_date, 
+       r.total_amount, 
+       r.tax, 
+       r.service_charge,
+       ri.id as item_id,
+       ri.name as item_name,
+       ri.price as item_price,
+       ri.quantity as item_quantity,
+       ri.category as item_category
+     FROM receipts r
+     LEFT JOIN receipt_items ri ON ri.receipt_id = r.id
      WHERE ${filter}
-     ORDER BY purchase_date DESC`,
+     ORDER BY r.purchase_date DESC`,
     params
   );
 
-  const results: MerchantReceiptDetail[] = [];
-  for (const r of receipts) {
-    const items = await db.getAllAsync<MerchantReceiptItem>(
-      `SELECT id, name, price, quantity, category
-       FROM receipt_items
-       WHERE receipt_id = ?`,
-      [r.id]
-    );
+  const receiptMap = new Map<string, MerchantReceiptDetail>();
 
-    results.push({
-      id: r.id,
-      purchaseDate: r.purchase_date,
-      totalAmount: r.total_amount,
-      tax: r.tax ?? 0,
-      serviceCharge: r.service_charge ?? 0,
-      items,
-    });
+  for (const row of rows) {
+    if (!receiptMap.has(row.receipt_id)) {
+      receiptMap.set(row.receipt_id, {
+        id: row.receipt_id,
+        purchaseDate: row.purchase_date,
+        totalAmount: row.total_amount,
+        tax: row.tax ?? 0,
+        serviceCharge: row.service_charge ?? 0,
+        items: [],
+      });
+    }
+
+    if (row.item_id) {
+      receiptMap.get(row.receipt_id)!.items.push({
+        id: row.item_id,
+        name: row.item_name!,
+        price: row.item_price!,
+        quantity: row.item_quantity!,
+        category: row.item_category!,
+      });
+    }
   }
 
-  return results;
+  return Array.from(receiptMap.values());
 }
 
 export async function saveReceipt(

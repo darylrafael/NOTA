@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ScrollView,
-  ActionSheetIOS,
+  Alert,
   StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -59,53 +59,60 @@ export default function HomeScreen() {
   const [itemSpend, setItemSpend] = useState<ItemSpendRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasError, setHasError] = useState(false);
   const [dateFilter, setDateFilter] = useState<DateFilter>('thisMonth');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
 
-  async function loadData() {
-    const [receiptData, spendData] = await Promise.all([getAllReceipts(db), getAllItemSpend(db)]);
-    setReceipts(receiptData);
-    setItemSpend(spendData);
-  }
+  const loadData = useCallback(async (getIsActive = () => true) => {
+    try {
+      if (getIsActive()) setHasError(false);
+      const [receiptData, spendData] = await Promise.all([getAllReceipts(db), getAllItemSpend(db)]);
+      if (getIsActive()) {
+        setReceipts(receiptData);
+        setItemSpend(spendData);
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    } catch (err) {
+      console.error('[HomeScreen] load error:', err);
+      if (getIsActive()) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+        setHasError(true);
+      }
+    }
+  }, [db]);
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
-      async function load() {
-        const [receiptData, spendData] = await Promise.all([getAllReceipts(db), getAllItemSpend(db)]);
-        if (isActive) {
-          setReceipts(receiptData);
-          setItemSpend(spendData);
-          setIsLoading(false);
-        }
-      }
-      load();
+      loadData(() => isActive);
       return () => {
         isActive = false;
       };
-    }, [db])
+    }, [loadData])
   );
 
   async function handleRefresh() {
     setIsRefreshing(true);
     await loadData();
-    setIsRefreshing(false);
   }
 
   function handleDeletePress(id: string) {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: 'Delete this transaction?',
-        options: ['Delete', 'Cancel'],
-        destructiveButtonIndex: 0,
-        cancelButtonIndex: 1,
-      },
-      async (buttonIndex) => {
-        if (buttonIndex === 0) {
-          await deleteReceipt(db, id);
-          loadData();
-        }
-      }
+    Alert.alert(
+      'Delete this transaction?',
+      'This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteReceipt(db, id);
+            loadData();
+          },
+        },
+      ]
     );
   }
 
@@ -133,6 +140,22 @@ export default function HomeScreen() {
       })
       .reduce((sum, rec) => sum + rec.amount, 0);
   }, [categoryFilter, filteredReceipts, itemSpend, range]);
+
+  if (hasError) {
+    return (
+      <View style={styles.flex}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+        <StateView
+          icon="alert-circle-outline"
+          iconTone="error"
+          title="Could not load data"
+          subtitle="Something went wrong. Pull to refresh or restart the app."
+          primaryLabel="Try Again"
+          onPrimaryPress={loadData}
+        />
+      </View>
+    );
+  }
 
   if (!isLoading && receipts.length === 0) {
     return (

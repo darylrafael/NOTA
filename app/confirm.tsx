@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useRef, useEffect } from 'react';
 import { useLocalSearchParams, useRouter, useFocusEffect, Stack } from 'expo-router';
 import {
   View,
@@ -10,7 +10,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  ActionSheetIOS,
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
@@ -25,6 +24,7 @@ import { formatRupiah } from '../lib/format';
 import { CATEGORIES, getCategoryMeta } from '../constants/categories';
 import { colors, spacing, radius } from '../constants/theme';
 import Button from '../components/Button';
+import CategoryPickerModal from '../components/CategoryPickerModal';
 import { EditableReceiptItem } from '../types/receipt';
 
 function createBlankItem(): EditableReceiptItem {
@@ -60,7 +60,17 @@ export default function ConfirmScreen() {
   const [isLoading, setIsLoading] = useState(isEditMode);
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [pickerTargetId, setPickerTargetId] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceType = params.sourceType ?? 'receipt';
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -125,17 +135,7 @@ export default function ConfirmScreen() {
   }
 
   function handleCategoryPress(localId: string) {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options: [...CATEGORIES, 'Cancel'],
-        cancelButtonIndex: CATEGORIES.length,
-      },
-      (buttonIndex) => {
-        if (buttonIndex < CATEGORIES.length) {
-          updateCategory(localId, CATEGORIES[buttonIndex]);
-        }
-      }
-    );
+    setPickerTargetId(localId);
   }
 
   async function handleSave() {
@@ -178,7 +178,7 @@ export default function ConfirmScreen() {
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setShowToast(true);
-      setTimeout(() => {
+      toastTimeoutRef.current = setTimeout(() => {
         if (isEditMode && params.receiptId) {
           router.replace(`/receipt/${params.receiptId}`);
         } else {
@@ -224,6 +224,8 @@ export default function ConfirmScreen() {
     );
   }
 
+  const selectedItemForPicker = items.find((i) => i.localId === pickerTargetId);
+
   return (
     <KeyboardAvoidingView 
       style={styles.flex} 
@@ -246,6 +248,16 @@ export default function ConfirmScreen() {
             </TouchableOpacity>
           ),
         }} 
+      />
+      <CategoryPickerModal
+        visible={!!pickerTargetId}
+        selectedCategory={selectedItemForPicker?.category}
+        onSelect={(category) => {
+          if (pickerTargetId) {
+            updateCategory(pickerTargetId, category);
+          }
+        }}
+        onClose={() => setPickerTargetId(null)}
       />
       <ScrollView 
         style={styles.flex} 

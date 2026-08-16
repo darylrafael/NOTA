@@ -1,7 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
 export async function initDatabase(db: SQLite.SQLiteDatabase) {
-  console.log('[DB] initDatabase START');
   try {
     await db.execAsync(`
       PRAGMA foreign_keys = ON;
@@ -28,6 +27,15 @@ export async function initDatabase(db: SQLite.SQLiteDatabase) {
         category TEXT PRIMARY KEY,
         monthly_limit REAL NOT NULL
       );
+
+      CREATE INDEX IF NOT EXISTS idx_receipt_items_receipt_id 
+        ON receipt_items(receipt_id);
+
+      CREATE INDEX IF NOT EXISTS idx_receipts_purchase_date 
+        ON receipts(purchase_date DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_receipt_items_category 
+        ON receipt_items(category);
     `);
 
     try {
@@ -53,9 +61,7 @@ export async function initDatabase(db: SQLite.SQLiteDatabase) {
     } catch {
       // column already exists — ignore
     }
-    console.log('[DB] initDatabase COMPLETE');
   } catch (e) {
-    console.log('[DB] initDatabase ERROR:', e);
     throw e;
   }
 }

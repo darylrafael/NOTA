@@ -9,6 +9,7 @@ import { getCategoryMeta } from '../../constants/categories';
 import { DOCUMENT_TYPE_META } from '../../constants/documentTypes';
 import { SourceType } from '../../types/receipt';
 import { colors, spacing, radius } from '../../constants/theme';
+import StateView from '../../components/StateView';
 
 export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -16,16 +17,26 @@ export default function ReceiptDetailScreen() {
   const router = useRouter();
   const [receipt, setReceipt] = useState<ReceiptDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
       async function load() {
         if (!id) return;
-        const data = await getReceiptDetail(db, id);
-        if (isActive) {
-          setReceipt(data);
-          setIsLoading(false);
+        try {
+          setHasError(false);
+          const data = await getReceiptDetail(db, id);
+          if (isActive) {
+            setReceipt(data);
+            setIsLoading(false);
+          }
+        } catch (err) {
+          console.error('[ReceiptDetailScreen] load error:', err);
+          if (isActive) {
+            setIsLoading(false);
+            setHasError(true);
+          }
         }
       }
       load();
@@ -34,6 +45,20 @@ export default function ReceiptDetailScreen() {
       };
     }, [db, id])
   );
+
+  if (hasError) {
+    return (
+      <View style={styles.flex}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+        <StateView
+          icon="alert-circle-outline"
+          iconTone="error"
+          title="Could not load data"
+          subtitle="Something went wrong. Pull to refresh or restart the app."
+        />
+      </View>
+    );
+  }
 
   if (isLoading) {
     return (

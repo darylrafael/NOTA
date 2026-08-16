@@ -172,12 +172,9 @@ app.post('/api/extract', async (req, res) => {
       return res.status(500).json({ error: 'Server configuration error' });
     }
 
-    // 3. Upstream Call with Verified Working Models on 503/429
+    // 3. Upstream Call with Verified Working Model
     const MODELS_TO_TRY = [
-      'gemini-flash-latest',
-      'gemini-3.5-flash',
       GEMINI_MODEL,
-      'gemini-3.7-flash',
     ];
     let lastErrorText = '';
     let lastStatus = 500;

@@ -95,7 +95,7 @@ export function calculateForecast(
 // Compares the trailing daily average (last up to 7 days) against the daily
 // average of the days before that window, within the same month. Surfaces
 // only the single biggest shift, and only if it clears a 20% threshold and
-// there is at least 3 days of "before" data — avoids flagging noise from
+// there is at least 3 days of "before" data â€” avoids flagging noise from
 // normal day-to-day variance or from too little history early in the month.
 export function findBiggestTrendShift(
   records: ItemSpendRecord[],

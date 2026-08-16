@@ -33,16 +33,24 @@ try {
   
   let leakFound = false;
   
+  let actualKey = process.env.GEMINI_API_KEY;
+  if (!actualKey) {
+    try {
+      const envContent = fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8');
+      const match = envContent.match(/^GEMINI_API_KEY=(.*)$/m);
+      if (match) actualKey = match[1].trim();
+    } catch (e) {}
+  }
+
   // A test key segment to search for, or generic identifier
-  // The actual key starts with AQ.Ab8RN
-  const searchPattern = /AQ\.Ab8RN|GEMINI_API_KEY/i;
+  const searchPattern = /GEMINI_API_KEY/i;
   
   for (const file of filesToScan) {
     const content = fs.readFileSync(file, 'utf8');
     if (searchPattern.test(content)) {
       // It is normal for the string "GEMINI_API_KEY" to appear as a dictionary key or type,
       // but the actual secret string should NOT appear.
-      if (content.includes('AQ.Ab8RN')) {
+      if (actualKey && content.includes(actualKey)) {
         console.error(`\n[CRITICAL FAILURE] Secret API key found in bundle: ${file}`);
         leakFound = true;
       }

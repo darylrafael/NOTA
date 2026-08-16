@@ -7,6 +7,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Alert,
   StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,13 +30,17 @@ export default function BudgetScreen() {
     useCallback(() => {
       let isActive = true;
       async function load() {
-        const budgets = await getBudgets(db);
-        if (isActive) {
-          const initial: Record<string, string> = {};
-          for (const category of CATEGORIES) {
-            initial[category] = budgets[category] ? String(budgets[category]) : '';
+        try {
+          const budgets = await getBudgets(db);
+          if (isActive) {
+            const initial: Record<string, string> = {};
+            for (const category of CATEGORIES) {
+              initial[category] = budgets[category] ? String(budgets[category]) : '';
+            }
+            setValues(initial);
           }
-          setValues(initial);
+        } catch (err) {
+          console.error('[BudgetScreen] load error:', err);
         }
       }
       load();
@@ -47,14 +52,26 @@ export default function BudgetScreen() {
 
   async function handleSave() {
     setIsSaving(true);
-    const payload: Record<string, number | null> = {};
-    for (const category of CATEGORIES) {
-      const raw = values[category]?.trim();
-      payload[category] = raw ? Number(raw) : null;
+    try {
+      const payload: Record<string, number | null> = {};
+      for (const category of CATEGORIES) {
+        const raw = values[category]?.trim();
+        if (!raw) {
+          payload[category] = null;
+        } else {
+          const parsed = Number(raw);
+          payload[category] = (!isNaN(parsed) && isFinite(parsed) && parsed > 0)
+            ? parsed
+            : null;
+        }
+      }
+      await setBudgets(db, payload);
+      router.back();
+    } catch (err) {
+      Alert.alert('Save Failed', 'Could not save budgets. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
-    await setBudgets(db, payload);
-    setIsSaving(false);
-    router.back();
   }
 
   return (
