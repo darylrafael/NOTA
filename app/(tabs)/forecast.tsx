@@ -6,6 +6,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getAllItemSpend, getBudgets, getTopMerchantsThisMonth, MerchantSummary } from '../../db/queries';
 import { calculateForecast, findBiggestTrendShift, CategoryForecast, ForecastInsight } from '../../lib/forecast';
+import { currentMonthRange } from '../../lib/date';
 import { getCategoryMeta } from '../../constants/categories';
 import { formatRupiah, toTitleCase } from '../../lib/format';
 import { colors, spacing, radius } from '../../constants/theme';
@@ -21,6 +22,7 @@ export default function ForecastScreen() {
   const [budgets, setBudgetsState] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -28,9 +30,7 @@ export default function ForecastScreen() {
       async function load() {
         try {
           setHasError(false);
-          const now = new Date();
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-          const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+          const { start: monthStart, end: monthEnd } = currentMonthRange();
 
           const [records, budgetData, merchants] = await Promise.all([
             getAllItemSpend(db),
@@ -59,7 +59,7 @@ export default function ForecastScreen() {
       return () => {
         isActive = false;
       };
-    }, [db])
+    }, [db, retryToken])
   );
 
   if (hasError) {
@@ -69,8 +69,14 @@ export default function ForecastScreen() {
         <StateView
           icon="alert-circle-outline"
           iconTone="error"
-          title="Could not load data"
-          subtitle="Something went wrong. Pull to refresh or restart the app."
+          title="Could not load forecast"
+          subtitle="Something went wrong while loading your spending outlook."
+          primaryLabel="Try Again"
+          onPrimaryPress={() => {
+            setIsLoading(true);
+            setHasError(false);
+            setRetryToken((n) => n + 1);
+          }}
         />
       </View>
     );

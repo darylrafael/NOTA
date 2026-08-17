@@ -16,8 +16,10 @@ import { useFocusEffect, useRouter, Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { getBudgets, setBudgets } from '../db/queries';
 import { CATEGORIES, getCategoryMeta } from '../constants/categories';
+import { parseRupiahInput } from '../lib/money';
 import { colors, spacing, radius } from '../constants/theme';
 import Button from '../components/Button';
+import StateView from '../components/StateView';
 
 export default function BudgetScreen() {
   const db = useSQLiteContext();
@@ -25,12 +27,15 @@ export default function BudgetScreen() {
   const insets = useSafeAreaInsets();
   const [values, setValues] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
       async function load() {
         try {
+          setHasError(false);
           const budgets = await getBudgets(db);
           if (isActive) {
             const initial: Record<string, string> = {};
@@ -39,15 +44,17 @@ export default function BudgetScreen() {
             }
             setValues(initial);
           }
-        } catch (err) {
-          console.error('[BudgetScreen] load error:', err);
+        } catch {
+          if (isActive) {
+            setHasError(true);
+          }
         }
       }
       load();
       return () => {
         isActive = false;
       };
-    }, [db])
+    }, [db, retryToken])
   );
 
   async function handleSave() {
@@ -59,19 +66,36 @@ export default function BudgetScreen() {
         if (!raw) {
           payload[category] = null;
         } else {
-          const parsed = Number(raw);
-          payload[category] = (!isNaN(parsed) && isFinite(parsed) && parsed > 0)
-            ? parsed
-            : null;
+          const parsed = parseRupiahInput(raw);
+          payload[category] = parsed > 0 ? parsed : null;
         }
       }
       await setBudgets(db, payload);
       router.back();
-    } catch (err) {
+    } catch {
       Alert.alert('Save Failed', 'Could not save budgets. Please try again.');
     } finally {
       setIsSaving(false);
     }
+  }
+
+  if (hasError) {
+    return (
+      <View style={styles.flex}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+        <StateView
+          icon="alert-circle-outline"
+          iconTone="error"
+          title="Could not load budgets"
+          subtitle="Something went wrong while loading your monthly limits."
+          primaryLabel="Try Again"
+          onPrimaryPress={() => {
+            setHasError(false);
+            setRetryToken((n) => n + 1);
+          }}
+        />
+      </View>
+    );
   }
 
   return (

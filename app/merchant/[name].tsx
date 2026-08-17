@@ -5,6 +5,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Ionicons } from '@expo/vector-icons';
 import { getMerchantReceipts, MerchantReceiptDetail } from '../../db/queries';
 import { formatRupiah, toTitleCase } from '../../lib/format';
+import { formatPurchaseDate } from '../../lib/date';
 import { getCategoryMeta } from '../../constants/categories';
 import { colors, spacing, radius } from '../../constants/theme';
 import StateView from '../../components/StateView';
@@ -16,6 +17,7 @@ export default function MerchantDetailScreen() {
   const [receipts, setReceipts] = useState<MerchantReceiptDetail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
 
   const merchantName = name ? decodeURIComponent(name) : 'Store Details';
 
@@ -43,7 +45,7 @@ export default function MerchantDetailScreen() {
       return () => {
         isActive = false;
       };
-    }, [db, name, merchantName])
+    }, [db, name, merchantName, retryToken])
   );
 
   const totalSpent = receipts.reduce((sum, r) => sum + r.totalAmount, 0);
@@ -57,7 +59,13 @@ export default function MerchantDetailScreen() {
           icon="alert-circle-outline"
           iconTone="error"
           title="Could not load data"
-          subtitle="Something went wrong. Pull to refresh or restart the app."
+          subtitle="Something went wrong. Please try again."
+          primaryLabel="Try Again"
+          onPrimaryPress={() => {
+            setIsLoading(true);
+            setHasError(false);
+            setRetryToken((n) => n + 1);
+          }}
         />
       </View>
     );
@@ -109,7 +117,7 @@ export default function MerchantDetailScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const dateStr = formatFullDate(item.purchaseDate);
+          const dateStr = formatPurchaseDate(item.purchaseDate);
 
           return (
             <TouchableOpacity 
@@ -153,7 +161,7 @@ export default function MerchantDetailScreen() {
                           )}
                         </View>
                       </View>
-                      <Text style={styles.itemPrice}>{formatRupiah(it.price * it.quantity)}</Text>
+                      <Text style={styles.itemPrice}>{formatRupiah(it.lineTotal)}</Text>
                     </View>
                   );
                 })}
@@ -180,14 +188,6 @@ export default function MerchantDetailScreen() {
       />
     </View>
   );
-}
-
-function formatFullDate(isoDate: string): string {
-  return new Date(isoDate).toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
 }
 
 const styles = StyleSheet.create({

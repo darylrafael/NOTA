@@ -1,3 +1,5 @@
+import { getDateParts } from './date';
+
 export interface ItemSpendRecord {
   category: string;
   purchaseDate: string;
@@ -25,8 +27,8 @@ function sumByCategoryForMonth(
 ): Map<string, number> {
   const totals = new Map<string, number>();
   for (const record of records) {
-    const date = new Date(record.purchaseDate);
-    if (date.getFullYear() !== year || date.getMonth() !== month) continue;
+    const parts = getDateParts(record.purchaseDate);
+    if (!parts || parts.year !== year || parts.month !== month) continue;
     const category = record.category || 'Other';
     totals.set(category, (totals.get(category) ?? 0) + record.amount);
   }
@@ -46,10 +48,10 @@ export function calculateForecast(
 
   const byCategory = new Map<string, Map<number, number>>();
   for (const record of records) {
-    const date = new Date(record.purchaseDate);
-    if (date.getFullYear() !== year || date.getMonth() !== month) continue;
+    const parts = getDateParts(record.purchaseDate);
+    if (!parts || parts.year !== year || parts.month !== month) continue;
     const category = record.category || 'Other';
-    const day = date.getDate();
+    const day = parts.day;
     if (!byCategory.has(category)) byCategory.set(category, new Map());
     const dailyMap = byCategory.get(category)!;
     dailyMap.set(day, (dailyMap.get(day) ?? 0) + record.amount);
@@ -111,10 +113,10 @@ export function findBiggestTrendShift(
 
   const byCategory = new Map<string, Map<number, number>>();
   for (const record of records) {
-    const date = new Date(record.purchaseDate);
-    if (date.getFullYear() !== year || date.getMonth() !== month) continue;
+    const parts = getDateParts(record.purchaseDate);
+    if (!parts || parts.year !== year || parts.month !== month) continue;
     const category = record.category || 'Other';
-    const day = date.getDate();
+    const day = parts.day;
     if (!byCategory.has(category)) byCategory.set(category, new Map());
     const dailyMap = byCategory.get(category)!;
     dailyMap.set(day, (dailyMap.get(day) ?? 0) + record.amount);

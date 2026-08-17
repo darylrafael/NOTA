@@ -3,14 +3,21 @@ const app = require('../index');
 
 describe('NOTA V2 Proxy Server Integration Tests', () => {
   let originalEnv;
+  let originalFetch;
 
   beforeAll(() => {
     originalEnv = { ...process.env };
+    originalFetch = global.fetch;
     process.env.GEMINI_API_KEY = 'test-key';
   });
 
   afterAll(() => {
     process.env = originalEnv;
+    global.fetch = originalFetch;
+  });
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
   });
 
   describe('Security & Validation', () => {
@@ -21,13 +28,24 @@ describe('NOTA V2 Proxy Server Integration Tests', () => {
         .send({});
       
       expect(res.statusCode).toBe(400);
-      expect(res.body.error).toBe('base64Image is required');
+      expect(res.body.error).toBe('base64Image must be a non-empty base64 string');
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should reject a non-string base64Image without using a scan quota', async () => {
+      const res = await request(app)
+        .post('/api/extract')
+        .set('x-device-id', 'test-device-invalid-image')
+        .send({ base64Image: { image: 'not-a-string' } });
+
+      expect(res.statusCode).toBe(400);
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
     it('should reject requests without an x-device-id header', async () => {
       const res = await request(app)
         .post('/api/extract')
-        .send({ base64Image: 'fake-image-data' });
+        .send({ base64Image: 'ZmFrZS1pbWFnZS1kYXRh' });
       
       expect(res.statusCode).toBe(401);
       expect(res.body.error).toBe('Missing device identifier');
@@ -46,19 +64,21 @@ describe('NOTA V2 Proxy Server Integration Tests', () => {
   });
 
   describe('Upstream AI Handling', () => {
-    // Note: To fully mock fetch we could use jest.spyOn(global, 'fetch')
-    // but in this test suite we will just let it fail gracefully against the real endpoint
-    // with our fake 'test-key', which should return 400 API key not valid.
-    
     it('should handle Gemini API errors gracefully (400 Invalid Key)', async () => {
+      global.fetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: async () => 'Invalid API key',
+      });
+
       const res = await request(app)
         .post('/api/extract')
         .set('x-device-id', 'test-device-123')
-        .send({ base64Image: 'base64-fake' });
+        .send({ base64Image: 'ZmFrZS1pbWFnZQ==' });
       
-      // Since our key is invalid, Google returns 400
       expect(res.statusCode).toBe(400);
       expect(res.body.error).toContain('Gemini API Error');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
   });
 });

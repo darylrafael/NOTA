@@ -28,7 +28,19 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow NOTA to access your camera so you can scan receipts."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow NOTA to access your photos so you can scan a receipt."
+        }
+      ]
     ]
   }
 }

@@ -1,1 +1,1 @@
-﻿export const ONBOARDING_KEY = 'nota_onboarding_complete';
+﻿export const ONBOARDING_KEY = 'nota_onboarding_complete_v2';

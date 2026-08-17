@@ -5,6 +5,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { getItemsByCategory, CategoryItemDetail } from '../../db/queries';
 import { getCategoryMeta } from '../../constants/categories';
 import { formatRupiah, toTitleCase } from '../../lib/format';
+import { currentMonthRange, formatPurchaseDateShort } from '../../lib/date';
 import { colors, spacing, radius } from '../../constants/theme';
 import StateView from '../../components/StateView';
 
@@ -15,6 +16,7 @@ export default function CategoryDetailScreen() {
   const [selectedMerchant, setSelectedMerchant] = useState<string>('All');
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -23,9 +25,7 @@ export default function CategoryDetailScreen() {
         if (!name) return;
         try {
           setHasError(false);
-          const now = new Date();
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-          const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+          const { start: monthStart, end: monthEnd } = currentMonthRange();
           const data = await getItemsByCategory(db, name, monthStart, monthEnd);
           if (isActive) {
             setItems(data);
@@ -43,7 +43,7 @@ export default function CategoryDetailScreen() {
       return () => {
         isActive = false;
       };
-    }, [db, name])
+    }, [db, name, retryToken])
   );
 
   const meta = getCategoryMeta(name ?? 'Other');
@@ -71,7 +71,7 @@ export default function CategoryDetailScreen() {
   }, [items, selectedMerchant]);
 
   const filteredTotal = useMemo(() => {
-    return filteredItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    return filteredItems.reduce((sum, item) => sum + item.lineTotal, 0);
   }, [filteredItems]);
 
   if (hasError) {
@@ -82,7 +82,13 @@ export default function CategoryDetailScreen() {
           icon="alert-circle-outline"
           iconTone="error"
           title="Could not load data"
-          subtitle="Something went wrong. Pull to refresh or restart the app."
+          subtitle="Something went wrong. Please try again."
+          primaryLabel="Try Again"
+          onPrimaryPress={() => {
+            setIsLoading(true);
+            setHasError(false);
+            setRetryToken((n) => n + 1);
+          }}
         />
       </View>
     );
@@ -166,7 +172,7 @@ export default function CategoryDetailScreen() {
           // Render grouped list container
           renderItem={({ item, index }) => {
             const merchantLabel = item.merchantName?.trim() || 'Store';
-            const dateStr = formatDate(item.purchaseDate);
+            const dateStr = formatPurchaseDateShort(item.purchaseDate);
             const qtyStr = item.quantity > 1 ? `${item.quantity}× · ` : '';
             const isFirst = index === 0;
             const isLast = index === filteredItems.length - 1;
@@ -188,7 +194,7 @@ export default function CategoryDetailScreen() {
                     {merchantLabel} · {qtyStr}{dateStr}
                   </Text>
                 </View>
-                <Text style={styles.itemPrice}>{formatRupiah(item.price * item.quantity)}</Text>
+                <Text style={styles.itemPrice}>{formatRupiah(item.lineTotal)}</Text>
               </View>
             );
           }}
@@ -196,10 +202,6 @@ export default function CategoryDetailScreen() {
       )}
     </View>
   );
-}
-
-function formatDate(isoDate: string): string {
-  return new Date(isoDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
 
 const styles = StyleSheet.create({

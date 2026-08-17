@@ -5,6 +5,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Ionicons } from '@expo/vector-icons';
 import { getReceiptDetail, ReceiptDetail } from '../../db/queries';
 import { formatRupiah, toTitleCase } from '../../lib/format';
+import { formatPurchaseDateLong, formatPurchaseDateShort } from '../../lib/date';
 import { getCategoryMeta } from '../../constants/categories';
 import { DOCUMENT_TYPE_META } from '../../constants/documentTypes';
 import { SourceType } from '../../types/receipt';
@@ -18,6 +19,7 @@ export default function ReceiptDetailScreen() {
   const [receipt, setReceipt] = useState<ReceiptDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,7 +45,7 @@ export default function ReceiptDetailScreen() {
       return () => {
         isActive = false;
       };
-    }, [db, id])
+    }, [db, id, retryToken])
   );
 
   if (hasError) {
@@ -54,7 +56,13 @@ export default function ReceiptDetailScreen() {
           icon="alert-circle-outline"
           iconTone="error"
           title="Could not load data"
-          subtitle="Something went wrong. Pull to refresh or restart the app."
+          subtitle="Something went wrong. Please try again."
+          primaryLabel="Try Again"
+          onPrimaryPress={() => {
+            setIsLoading(true);
+            setHasError(false);
+            setRetryToken((n) => n + 1);
+          }}
         />
       </View>
     );
@@ -83,7 +91,7 @@ export default function ReceiptDetailScreen() {
       <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
       <Stack.Screen
         options={{
-          title: formatDate(receipt.purchaseDate),
+          title: formatPurchaseDateShort(receipt.purchaseDate),
           headerBackTitle: 'Back',
           headerTitleStyle: {
             fontFamily: 'Manrope_700Bold',
@@ -118,7 +126,7 @@ export default function ReceiptDetailScreen() {
                   {merchantDisplay}
                 </Text>
                 <View style={styles.merchantDateRow}>
-                  <Text style={styles.merchantDate}>{formatFullDate(receipt.purchaseDate)}</Text>
+                  <Text style={styles.merchantDate}>{formatPurchaseDateLong(receipt.purchaseDate)}</Text>
                   {receipt.sourceType && receipt.sourceType !== 'receipt' && (
                     <View style={[styles.sourceBadge, { backgroundColor: '#F1F5F9' }]}>
                       <Ionicons 
@@ -170,7 +178,7 @@ export default function ReceiptDetailScreen() {
                   )}
                 </View>
               </View>
-              <Text style={styles.itemPriceText}>{formatRupiah(item.price * item.quantity)}</Text>
+              <Text style={styles.itemPriceText}>{formatRupiah(item.lineTotal)}</Text>
             </View>
           );
         }}
@@ -189,10 +197,16 @@ export default function ReceiptDetailScreen() {
                   <Text style={styles.chargeValue}>{formatRupiah(receipt.serviceCharge)}</Text>
                 </View>
               )}
+              {receipt.discount > 0 && (
+                <View style={styles.chargeRow}>
+                  <Text style={styles.chargeLabel}>Discount</Text>
+                  <Text style={styles.chargeValue}>-{formatRupiah(receipt.discount)}</Text>
+                </View>
+              )}
               <View
                 style={[
                   styles.totalRow,
-                  !(receipt.tax > 0 || receipt.serviceCharge > 0) && {
+                  !(receipt.tax > 0 || receipt.serviceCharge > 0 || receipt.discount > 0) && {
                     borderTopWidth: 0,
                     marginTop: 0,
                     paddingTop: 0,
@@ -208,21 +222,6 @@ export default function ReceiptDetailScreen() {
       />
     </View>
   );
-}
-
-function formatDate(isoDate: string): string {
-  return new Date(isoDate).toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'short',
-  });
-}
-
-function formatFullDate(isoDate: string): string {
-  return new Date(isoDate).toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
 }
 
 const styles = StyleSheet.create({

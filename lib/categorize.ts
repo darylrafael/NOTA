@@ -49,7 +49,7 @@ const CATEGORY_KEYWORDS: Record<Exclude<Category, 'Other'>, string[]> = {
   ],
   Bills: [
     'listrik', 'pln', 'pdam', 'pulsa', 'token', 'tagihan', 'wifi', 'indihome',
-    'electricity', 'bill', 'internet', 'subscription', 'air', 'pam',
+    'electricity', 'bill', 'internet', 'subscription', 'tagihan air', 'rekening air', 'pam',
     'telkom', 'firstmedia', 'biznet', 'paket data', 'iuran', 'kos', 'sewa',
     'kontrakan', 'cicilan', 'kredit', 'angsuran', 'bpjs', 'pajak'
   ],
@@ -59,10 +59,18 @@ export function categorizeItem(itemName: string): Category {
   const normalized = itemName.toLowerCase().trim();
 
   for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some((keyword) => normalized.includes(keyword))) {
+    if (keywords.some((keyword) => matchesKeyword(normalized, keyword))) {
       return category as Category;
     }
   }
 
   return 'Other';
+}
+
+function matchesKeyword(normalized: string, keyword: string): boolean {
+  if (keyword.length <= 3) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(normalized);
+  }
+  return normalized.includes(keyword);
 }

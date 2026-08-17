@@ -26,46 +26,67 @@ interface ErrorCopy {
 const ERROR_COPY: Record<GeminiVisionErrorKind, ErrorCopy> = {
   network: {
     icon: 'cloud-offline-outline',
-    title: "Couldn't analyze receipt",
-    subtitle: 'We couldn\u2019t process this receipt. Check your connection and try again.',
+    title: "Couldn't analyze this document",
+    subtitle: "We couldn't reach the scanner. Check your connection, then try again or enter the items yourself.",
     primaryLabel: 'Try Again',
   },
   processing: {
     icon: 'scan-outline',
     title: "Couldn't read this document",
-    subtitle: 'The photo may be blurry, unclear, or not a supported document. Try taking a new photo.',
+    subtitle: 'The photo may be blurry, cropped, or not a supported receipt or payment proof. Retake it, or enter the details manually.',
     primaryLabel: 'Retake Photo',
   },
 };
+
+const PROCESSING_STEPS = ['Analyzing document…', 'Identifying items…', 'Calculating totals…'];
 
 export default function ScanScreen() {
   const [mode, setMode] = useState<ScreenMode>('idle');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<GeminiVisionErrorKind>('processing');
+  const [processingStep, setProcessingStep] = useState(0);
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const router = useRouter();
 
-  // Reset screen mode to 'idle' whenever user navigates back to Scan screen
   useFocusEffect(
     useCallback(() => {
-      setMode((prev) => (prev === 'processing' ? 'idle' : prev));
+      return () => {
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          abortControllerRef.current = null;
+        }
+        setMode((current) => (current === 'camera' || current === 'processing' ? 'idle' : current));
+      };
     }, [])
   );
 
   useEffect(() => {
     return () => {
-      // Abort any ongoing network request when the screen unmounts
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (mode !== 'processing') {
+      setProcessingStep(0);
+      return;
+    }
+    const id = setInterval(() => {
+      setProcessingStep((prev) => (prev + 1) % PROCESSING_STEPS.length);
+    }, 2200);
+    return () => clearInterval(id);
+  }, [mode]);
 
   async function handleOpenCamera() {
     if (!permission?.granted) {
       const result = await requestPermission();
       if (!result.granted) {
-        Alert.alert('Camera Permission Required', 'NOTA needs camera access to scan receipts.');
+        Alert.alert(
+          'Camera Permission Required',
+          'NOTA needs camera access to scan receipts. You can still choose a photo from your gallery or enter items manually.'
+        );
         return;
       }
     }
@@ -74,22 +95,38 @@ export default function ScanScreen() {
 
   async function handleTakePhoto() {
     if (!cameraRef.current) return;
-    const photo = await cameraRef.current.takePictureAsync({ quality: 1, base64: false });
-    if (photo?.uri) {
-      setPhotoUri(photo.uri);
-      setMode('preview');
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 1, base64: false });
+      if (photo?.uri) {
+        setPhotoUri(photo.uri);
+        setMode('preview');
+      }
+    } catch {
+      Alert.alert('Camera Error', 'Could not take a photo. Try again, or choose one from your gallery.');
     }
   }
 
   async function handlePickFromGallery() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 1,
-      base64: false,
-    });
-    if (!result.canceled && result.assets[0].uri) {
-      setPhotoUri(result.assets[0].uri);
-      setMode('preview');
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert(
+          'Photo Access Required',
+          'NOTA needs access to your photos to upload a receipt or payment screenshot. You can still type the items manually.'
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 1,
+        base64: false,
+      });
+      if (!result.canceled && result.assets[0].uri) {
+        setPhotoUri(result.assets[0].uri);
+        setMode('preview');
+      }
+    } catch {
+      Alert.alert('Gallery Error', 'Could not open your photo library. Try again, or enter items manually.');
     }
   }
 
@@ -105,9 +142,9 @@ export default function ScanScreen() {
   async function handleProceed() {
     if (!photoUri) return;
     setMode('processing');
-    
+
     abortControllerRef.current = new AbortController();
-    
+
     try {
       const manipulated = await ImageManipulator.manipulateAsync(
         photoUri,
@@ -121,17 +158,21 @@ export default function ScanScreen() {
 
       const result = await extractDocument(manipulated.base64, abortControllerRef.current.signal);
       abortControllerRef.current = null;
-      
+
       const cleanedItems = filterNonExpenseItems(result.items);
+      if (cleanedItems.length === 0) {
+        throw new GeminiVisionError('No valid items could be read from this document.', 'processing');
+      }
+
       const editableItems: EditableReceiptItem[] = cleanedItems.map((item) => ({
         localId: randomUUID(),
         name: item.name,
-        price: Math.round(item.price / item.quantity),
+        price: item.unitPrice,
         quantity: item.quantity,
         category: categorizeItem(item.name),
-        lineTotal: item.price,
+        lineTotal: item.lineTotal,
       }));
-      
+
       setPhotoUri(null);
       setMode('idle');
 
@@ -140,14 +181,22 @@ export default function ScanScreen() {
         params: {
           items: JSON.stringify(editableItems),
           merchantName: result.merchantName,
-          receiptTotal: String(result.receiptTotal ?? 0),
+          receiptTotal: result.receiptTotal === null ? '' : String(result.receiptTotal),
           tax: String(result.tax ?? 0),
           serviceCharge: String(result.serviceCharge ?? 0),
+          discount: String(result.discount ?? 0),
           sourceType: result.sourceType,
+          purchaseDate: result.purchaseDate ?? '',
+          dateExtracted: result.dateExtracted ? '1' : '0',
+          hadParsingIssues: result.hadParsingIssues ? '1' : '0',
         },
       });
     } catch (err) {
       abortControllerRef.current = null;
+      if (err instanceof Error && err.name === 'AbortError') {
+        setMode('idle');
+        return;
+      }
       const kind = err instanceof GeminiVisionError ? err.kind : 'network';
       setErrorKind(kind);
       setMode('error');
@@ -187,7 +236,8 @@ export default function ScanScreen() {
         {photoUri && <Image source={{ uri: photoUri }} style={styles.processingThumbnail} resizeMode="cover" />}
         <View style={styles.processingOverlay}>
           <View style={styles.processingCard}>
-            <Text style={styles.processingText}>Analyzing document...</Text>
+            <Text style={styles.processingText}>{PROCESSING_STEPS[processingStep]}</Text>
+            <Text style={styles.processingHint}>This usually takes a few seconds</Text>
           </View>
         </View>
       </View>
@@ -230,9 +280,9 @@ export default function ScanScreen() {
         <View style={styles.iconCircle}>
           <Ionicons name="document-text-outline" size={32} color="#0F172A" />
         </View>
-        <Text style={styles.title}>Add Transaction</Text>
+        <Text style={styles.title}>Scan a receipt</Text>
         <Text style={styles.subtitle}>
-          Take a photo of your receipt or upload a transfer/e-wallet screenshot.
+          Take a photo of a receipt or Indonesian payment proof. We extract the details — you review them before anything is saved.
         </Text>
 
         <View style={styles.buttonGroup}>
@@ -333,6 +383,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
+    alignItems: 'center',
   },
   processingText: { color: '#fff', fontFamily: 'Manrope_700Bold', fontSize: 15 },
+  processingHint: {
+    color: 'rgba(255,255,255,0.7)',
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 12,
+    marginTop: 6,
+  },
 });

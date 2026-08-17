@@ -1,5 +1,5 @@
 export function formatRupiah(amount: number): string {
-  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const safeAmount = Number.isFinite(amount) ? Math.round(amount) : 0;
   return `Rp${safeAmount.toLocaleString('id-ID')}`;
 }
 

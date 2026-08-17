@@ -1,8 +1,8 @@
 import Constants from 'expo-constants';
-import { ParsedReceiptItem, GeminiExtractionResult } from '../types/receipt';
+import { GeminiExtractionResult } from '../types/receipt';
 import { getDeviceId } from './device';
+import { parseAndValidateExtraction } from './parseExtraction';
 
-// Resolve proxy URL dynamically for physical Android devices testing on LAN
 function getProxyUrl() {
   if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
   const hostUri = Constants.expoConfig?.hostUri;
@@ -42,96 +42,47 @@ export async function extractDocument(base64Image: string, signal?: AbortSignal)
     });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new GeminiVisionError('Request cancelled.', 'network');
+      throw err;
     }
-    console.warn('Proxy API Error caught in fetch:', err);
-    throw new GeminiVisionError('Failed to connect to backend proxy. Check your internet connection or server status.', 'network');
+    throw new GeminiVisionError(
+      'Failed to connect to backend proxy. Check your internet connection or server status.',
+      'network'
+    );
   }
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => 'no body');
-    console.warn(`Proxy API error (${response.status}):`, errorText);
-    
     if (response.status === 429) {
       throw new GeminiVisionError('Limit scan harian tercapai atau terlalu banyak request.', 'network');
     }
     if (response.status === 413) {
-      throw new GeminiVisionError('Ukuran gambar terlalu besar. Coba ambil foto dengan lebih sedikit area background.', 'network');
+      throw new GeminiVisionError(
+        'Ukuran gambar terlalu besar. Coba ambil foto dengan lebih sedikit area background.',
+        'network'
+      );
     }
-    
     throw new GeminiVisionError(`Server error (${response.status}). Please try again.`, 'network');
   }
 
   const json = await response.json();
   const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-  if (!rawText) {
-    throw new GeminiVisionError('Gemini did not return a result. Try retaking the photo with better lighting.', 'processing');
+  if (!rawText || typeof rawText !== 'string') {
+    throw new GeminiVisionError(
+      'Gemini did not return a result. Try retaking the photo with better lighting.',
+      'processing'
+    );
   }
 
-  return parseAndValidate(rawText);
-}
-
-function parseAndValidate(rawText: string): GeminiExtractionResult {
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(rawText);
-  } catch {
-    throw new GeminiVisionError("Could not parse AI response. Please retake the photo.", 'processing');
-  }
-
-  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as any).items)) {
-    throw new GeminiVisionError('Unexpected response format from AI. Please retake the photo.', 'processing');
-  }
-
-  const rawMerchantName = (parsed as any).merchantName;
-  const merchantName = typeof rawMerchantName === 'string' ? rawMerchantName.trim() : '';
-  
-  const rawSourceType = (parsed as any).sourceType;
-  const sourceType = typeof rawSourceType === 'string' && ['receipt', 'bank_transfer', 'ewallet', 'qris'].includes(rawSourceType) ? rawSourceType : 'receipt';
-
-  const items: ParsedReceiptItem[] = [];
-  let hadParsingIssues = false;
-
-  for (const raw of (parsed as any).items) {
-    const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
-    const price = Number(raw?.price);
-    const quantity = Number(raw?.quantity);
-
-    const isValid = name.length > 0 && !Number.isNaN(price) && Number.isFinite(price) && price >= 0;
-
-    if (!isValid) {
-      hadParsingIssues = true;
-      continue;
+    return parseAndValidateExtraction(rawText);
+  } catch (err) {
+    const code = err instanceof Error ? err.message : '';
+    if (code === 'MALFORMED_JSON' || code === 'UNEXPECTED_FORMAT') {
+      throw new GeminiVisionError('Could not parse AI response. Please retake the photo.', 'processing');
     }
-
-    items.push({
-      name,
-      price,
-      quantity: (!Number.isNaN(quantity) && Number.isFinite(quantity) && quantity > 0) ? Math.round(quantity) : 1,
-    });
+    if (code === 'NO_VALID_ITEMS') {
+      throw new GeminiVisionError('No valid items could be read from this document.', 'processing');
+    }
+    throw new GeminiVisionError('Could not read this document. Please retake the photo.', 'processing');
   }
-
-  if (items.length === 0) {
-    throw new GeminiVisionError('No valid items could be read from this document.', 'processing');
-  }
-
-  const receiptTotal = Number((parsed as any).receiptTotal);
-  const safeReceiptTotal = (!Number.isNaN(receiptTotal) && Number.isFinite(receiptTotal)) ? receiptTotal : 0;
-  
-  const tax = Number((parsed as any).tax);
-  const safeTax = (!Number.isNaN(tax) && Number.isFinite(tax)) ? tax : 0;
-  
-  const serviceCharge = Number((parsed as any).serviceCharge);
-  const safeServiceCharge = (!Number.isNaN(serviceCharge) && Number.isFinite(serviceCharge)) ? serviceCharge : 0;
-
-  return { 
-    items, 
-    hadParsingIssues, 
-    merchantName, 
-    receiptTotal: safeReceiptTotal, 
-    tax: safeTax, 
-    serviceCharge: safeServiceCharge,
-    sourceType: sourceType as any // TypeScript will infer SourceType from the return type
-  };
 }

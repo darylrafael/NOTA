@@ -17,6 +17,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getAllReceipts, getAllItemSpend, deleteReceipt, ReceiptSummary, ItemSpendRecord } from '../../db/queries';
 import { formatRupiah } from '../../lib/format';
+import { formatPurchaseDate, currentMonthRange, previousMonthRange, isInRange, parsePurchaseDate } from '../../lib/date';
 import { CATEGORIES, getCategoryMeta } from '../../constants/categories';
 import { DOCUMENT_TYPE_META } from '../../constants/documentTypes';
 import { SourceType } from '../../types/receipt';
@@ -31,24 +32,14 @@ const DATE_FILTERS: { key: DateFilter; label: string }[] = [
   { key: 'allTime', label: 'All Time' },
 ];
 
-function getDateRange(filter: DateFilter): { start: Date; end: Date } | null {
-  const now = new Date();
+function getDateRange(filter: DateFilter): { start: string; end: string } | null {
   if (filter === 'allTime') return null;
-  if (filter === 'thisMonth') {
-    return {
-      start: new Date(now.getFullYear(), now.getMonth(), 1),
-      end: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-    };
-  }
-  return {
-    start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
-    end: new Date(now.getFullYear(), now.getMonth(), 1),
-  };
+  if (filter === 'thisMonth') return currentMonthRange();
+  return previousMonthRange();
 }
 
-function formatDate(isoDate: string): string {
-  const d = new Date(isoDate);
-  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+function formatDate(value: string): string {
+  return formatPurchaseDate(value);
 }
 
 export default function HomeScreen() {
@@ -63,7 +54,7 @@ export default function HomeScreen() {
   const [dateFilter, setDateFilter] = useState<DateFilter>('thisMonth');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
 
-  const loadData = useCallback(async (getIsActive = () => true) => {
+  const loadData = useCallback(async (getIsActive: () => boolean = () => true) => {
     try {
       if (getIsActive()) setHasError(false);
       const [receiptData, spendData] = await Promise.all([getAllReceipts(db), getAllItemSpend(db)]);
@@ -108,8 +99,12 @@ export default function HomeScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await deleteReceipt(db, id);
-            loadData();
+            try {
+              await deleteReceipt(db, id);
+              loadData();
+            } catch {
+              Alert.alert('Delete Failed', 'Could not delete this transaction. Please try again.');
+            }
           },
         },
       ]
@@ -120,8 +115,7 @@ export default function HomeScreen() {
 
   const filteredReceipts = useMemo(() => {
     return receipts.filter((r) => {
-      const d = new Date(r.purchaseDate);
-      const inRange = !range || (d >= range.start && d < range.end);
+      const inRange = !range || isInRange(r.purchaseDate, range.start, range.end);
       const inCategory = categoryFilter === 'All' || r.categories.includes(categoryFilter);
       return inRange && inCategory;
     });
@@ -135,8 +129,8 @@ export default function HomeScreen() {
       .filter((rec) => {
         const category = rec.category || 'Other';
         if (category !== categoryFilter) return false;
-        const d = new Date(rec.purchaseDate);
-        return !range || (d >= range.start && d < range.end);
+        const normalized = parsePurchaseDate(rec.purchaseDate);
+        return !range || (normalized !== null && normalized >= range.start && normalized < range.end);
       })
       .reduce((sum, rec) => sum + rec.amount, 0);
   }, [categoryFilter, filteredReceipts, itemSpend, range]);
@@ -164,7 +158,9 @@ export default function HomeScreen() {
         <StateView
           icon="receipt-outline"
           title="No receipts yet"
-          subtitle="Tap Scan to add your first one."
+          subtitle="Scan a receipt or payment proof and we'll organize it for you."
+          primaryLabel="Scan a receipt"
+          onPrimaryPress={() => router.push('/scan')}
         />
       </View>
     );
@@ -187,6 +183,7 @@ export default function HomeScreen() {
             {/* Header: Overview Title */}
             <View style={styles.headerSection}>
               <Text style={styles.headerTitle}>Overview</Text>
+              <Text style={styles.headerSubtitle}>Your spending at a glance</Text>
             </View>
 
             {/* Compact Spending Summary Card */}
@@ -359,6 +356,12 @@ const styles = StyleSheet.create({
     fontSize: 26,
     color: '#0F172A', // Dark Navy
     letterSpacing: -0.6,
+  },
+  headerSubtitle: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 2,
   },
   summaryCardWrapper: {
     paddingHorizontal: spacing.md,
