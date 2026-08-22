@@ -35,13 +35,16 @@ For a physical receipt or digital invoice (e-commerce, food delivery), identify 
 
 For a bank transfer, e-wallet, or QRIS proof, return exactly one item: use the transfer note as its name, or "Transfer" if no note exists. Its quantity is 1 and its lineTotal/unitPrice is the transferred amount.
 
-For charges (tax, serviceCharge, discount):
-IMPORTANT MATH RULE: Only extract these if they are explicitly applied to the sum of lineTotals to reach the printed receiptTotal. If sum(items) already equals receiptTotal, set these all to 0.
-- tax: extract the total NOMINAL amount in Rupiah. NEVER return a percentage rate (if it says "10%", calculate nominal). ONLY extract it if it is added on top of the items to reach the receiptTotal. If tax is already included in the item prices ("Harga Termasuk Pajak" / "Inc Tax"), set to 0.
-- serviceCharge: extract the total NOMINAL amount. ONLY extract if added on top of the items to reach the receiptTotal.
-- discount: extract the total NOMINAL discount as a positive number. NEVER return a percentage. ONLY extract if it is subtracted from the subtotal to reach the receiptTotal. If it is a cashback (e.g. GoPay Coins cashback), or if the item lineTotals are already discounted on the receipt, set discount to 0.
+For every document, extract purchaseDate as YYYY-MM-DD only when confidently visible. Do not invent a date. Extract receiptTotal as the printed grand total amount (the final amount paid). All monetary values must be numbers without currency symbols or separators.
 
-For every document, extract purchaseDate as YYYY-MM-DD only when confidently visible. Do not invent a date. Extract receiptTotal as the printed grand total amount. All monetary values must be numbers without currency symbols or separators.
+CRITICAL MATH VALIDATION:
+Before returning the JSON, you MUST mentally verify this exact mathematical equation:
+(Sum of all item lineTotals) + tax + serviceCharge - discount == receiptTotal
+
+If this equation is NOT true, your extraction is WRONG. Pay extreme attention to these Indonesian receipt conventions:
+1. TAX INCLUSIVE (Termasuk PPN): If the item prices already include tax (e.g. Super Indo prints "Sub Total (Termasuk PPN)" and a PPN breakdown at the bottom), you MUST set tax: 0. Only set tax > 0 if it is EXPLICITLY ADDED to the subtotal to reach the receiptTotal.
+2. If sum(items) - discount == receiptTotal, then tax and serviceCharge MUST be 0. Do not extract informational tax numbers at the bottom of the receipt if they break the equation.
+3. ITEM-LEVEL VS GLOBAL DISCOUNTS: If a receipt shows discounts under specific items AND a 'Total Discount' at the bottom, DO NOT double-count them. Choose ONE method: EITHER subtract discounts from individual item lineTotals and set global discount: 0, OR keep item lineTotals at their original price and put the sum in global discount. The final equation MUST balance.
 `.trim();
 
 const RESPONSE_SCHEMA = {

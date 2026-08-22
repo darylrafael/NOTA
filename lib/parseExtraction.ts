@@ -138,9 +138,25 @@ export function parseAndValidateExtraction(rawText: string): GeminiExtractionRes
   // 1. Likely percentage rate mistakenly parsed as nominal rupiah (e.g. tax = 8 or 10 or 11 when subtotal >= 1000)
   // 2. Unusually tiny tax ratio (<1% when subtotal is substantial)
   // 3. Unusually excessive tax ratio (>35% when subtotal is substantial)
-  if (tax > 0 && itemsSubtotal > 0) {
-    const taxRatio = tax / itemsSubtotal;
-    const isLikelyPercentage = tax <= 30 && itemsSubtotal >= 1000;
+  let finalTax = tax;
+  let finalServiceCharge = serviceCharge;
+
+  if (receiptTotal !== null) {
+    const isInclusiveMatch = Math.abs((itemsSubtotal - discount) - receiptTotal) <= 5;
+    const isExclusiveMatch = Math.abs((itemsSubtotal + tax + serviceCharge - discount) - receiptTotal) <= 5;
+
+    // Auto-correct: If the receipt total equals items minus discount, 
+    // it means tax/service are already included in the item prices (or are zero).
+    // If the LLM extracted them anyway (e.g. from an informational footer), zero them out.
+    if (isInclusiveMatch && !isExclusiveMatch && (tax > 0 || serviceCharge > 0)) {
+      finalTax = 0;
+      finalServiceCharge = 0;
+    }
+  }
+
+  if (finalTax > 0 && itemsSubtotal > 0) {
+    const taxRatio = finalTax / itemsSubtotal;
+    const isLikelyPercentage = finalTax <= 30 && itemsSubtotal >= 1000;
     const isUnusuallyTiny = itemsSubtotal >= 10000 && taxRatio < 0.01;
     const isUnusuallyHuge = itemsSubtotal >= 10000 && taxRatio > 0.35;
 
@@ -149,7 +165,7 @@ export function parseAndValidateExtraction(rawText: string): GeminiExtractionRes
     }
   }
 
-  const calculated = calculatedReceiptTotal({ items, tax, serviceCharge, discount });
+  const calculated = calculatedReceiptTotal({ items, tax: finalTax, serviceCharge: finalServiceCharge, discount });
   if (reconcileTotals(calculated, receiptTotal).status === 'mismatch') {
     warnings.push('total_mismatch');
   }
@@ -159,8 +175,8 @@ export function parseAndValidateExtraction(rawText: string): GeminiExtractionRes
     hadParsingIssues: warnings.some((w) => w !== 'total_mismatch' && w !== 'missing_date'),
     merchantName,
     receiptTotal,
-    tax,
-    serviceCharge,
+    tax: finalTax,
+    serviceCharge: finalServiceCharge,
     discount,
     sourceType,
     purchaseDate,
