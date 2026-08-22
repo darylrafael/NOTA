@@ -49,18 +49,23 @@ export function allocateReceiptTotalByCategory(
   });
 }
 
+export type ReconciliationStatus = 'match' | 'small_difference' | 'mismatch' | 'ocr_missing';
+
 export function reconcileTotals(
   calculated: number,
   ocrTotal: number | null
-): { status: 'match' | 'mismatch' | 'ocr_missing'; difference: number } {
+): { status: ReconciliationStatus; difference: number } {
   if (ocrTotal === null || !Number.isFinite(ocrTotal)) {
     return { status: 'ocr_missing', difference: 0 };
   }
   const ocr = roundRupiah(ocrTotal);
   const calculatedSafe = roundRupiah(calculated);
   const difference = calculatedSafe - ocr;
+  if (difference === 0) {
+    return { status: 'match', difference: 0 };
+  }
   if (Math.abs(difference) <= TOTAL_MATCH_TOLERANCE) {
-    return { status: 'match', difference };
+    return { status: 'small_difference', difference };
   }
   return { status: 'mismatch', difference };
 }

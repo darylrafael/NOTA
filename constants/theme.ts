@@ -67,3 +67,24 @@ export const shadow = {
     elevation: 4,
   },
 };
+
+export const typography = {
+  // Headings
+  h1: { fontFamily: 'Manrope_800ExtraBold', fontSize: 28, letterSpacing: -0.8, color: colors.textPrimary },
+  h2: { fontFamily: 'Manrope_800ExtraBold', fontSize: 24, letterSpacing: -0.6, color: colors.textPrimary },
+  h3: { fontFamily: 'Manrope_700Bold', fontSize: 18, letterSpacing: -0.3, color: colors.textPrimary },
+  h4: { fontFamily: 'Manrope_700Bold', fontSize: 15, letterSpacing: -0.2, color: colors.textPrimary },
+  
+  // Body text
+  body: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.textPrimary },
+  bodySecondary: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.textSecondary },
+  
+  // Financial numbers
+  numberHero: { fontFamily: 'Manrope_800ExtraBold', fontSize: 32, letterSpacing: -1, color: colors.textPrimary },
+  numberPrimary: { fontFamily: 'Manrope_800ExtraBold', fontSize: 18, letterSpacing: -0.4, color: colors.textPrimary },
+  numberSecondary: { fontFamily: 'Manrope_700Bold', fontSize: 14, letterSpacing: -0.2, color: colors.textPrimary },
+  
+  // Small labels
+  caption: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: colors.textSecondary },
+  label: { fontFamily: 'Manrope_700Bold', fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase' as const, color: colors.textSecondary },
+};

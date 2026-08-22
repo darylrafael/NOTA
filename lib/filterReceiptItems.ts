@@ -6,10 +6,6 @@ const NON_EXPENSE_PATTERNS = [
   'ppn',
   'pb1',
   'pb 1',
-  'service charge',
-  'service',
-  'sc',
-  'biaya layanan',
   'total',
   'grand total',
   'total bayar',
@@ -46,9 +42,12 @@ export function filterNonExpenseItems<T extends { name: string }>(items: T[]): T
       normalized.includes('total bayar') ||
       normalized.includes('grand total') ||
       normalized.includes('total tagihan') ||
+      normalized.includes('total belanja') ||
+      normalized.includes('total amount') ||
+      normalized.includes('total pembayaran') ||
+      normalized.includes('total pesanan') ||
       normalized.includes('kembalian') ||
-      normalized.startsWith('total ') ||
-      normalized.startsWith('subtotal ') ||
+      normalized.startsWith('subtotal') ||
       normalized.startsWith('pajak ') ||
       normalized.startsWith('tax ') ||
       normalized.startsWith('diskon ') ||

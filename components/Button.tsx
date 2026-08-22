@@ -1,5 +1,5 @@
-﻿import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, GestureResponderEvent, ViewStyle } from 'react-native';
-import { colors, radius, spacing, shadow } from '../constants/theme';
+import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, GestureResponderEvent, ViewStyle } from 'react-native';
+import { colors, radius, spacing, shadow, typography } from '../constants/theme';
 
 interface ButtonProps {
   label: string;
@@ -50,7 +50,7 @@ const styles = StyleSheet.create({
   primary: { backgroundColor: colors.primary, ...shadow.tinted },
   secondary: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: colors.primary },
   disabled: { opacity: 0.45, shadowOpacity: 0, elevation: 0 },
-  label: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
+  label: typography.h4,
   labelPrimary: { color: colors.textOnPrimary },
   labelSecondary: { color: colors.primary },
 });

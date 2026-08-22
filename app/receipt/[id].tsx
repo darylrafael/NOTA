@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar, Image, Modal, ScrollView, SafeAreaView } from 'react-native';
 import { useLocalSearchParams, useFocusEffect, useRouter, Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +20,7 @@ export default function ReceiptDetailScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
+  const [isViewerVisible, setIsViewerVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -85,19 +86,26 @@ export default function ReceiptDetailScreen() {
   }
 
   const merchantDisplay = receipt.merchantName?.trim() || 'Shopping Receipt';
+  
+  const primaryCategory = Object.entries(
+    receipt.items.reduce((acc, item) => {
+      const cat = item.category || 'Other';
+      acc[cat] = (acc[cat] || 0) + item.lineTotal;
+      return acc;
+    }, {} as Record<string, number>)
+  ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Other';
+  
+  const primaryMeta = getCategoryMeta(primaryCategory);
 
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
       <Stack.Screen
         options={{
-          title: formatPurchaseDateShort(receipt.purchaseDate),
+          title: '', // Minimalist header
           headerBackTitle: 'Back',
-          headerTitleStyle: {
-            fontFamily: 'Manrope_700Bold',
-            fontSize: 16,
-            color: '#0F172A',
-          },
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: '#FAFAFA' },
           headerRight: () => (
             <TouchableOpacity
               onPress={() => router.push({ pathname: '/confirm', params: { receiptId: receipt.id } })}
@@ -116,35 +124,61 @@ export default function ReceiptDetailScreen() {
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <View style={styles.headerSection}>
-            {/* Merchant Info Hero */}
-            <View style={styles.merchantCard}>
-              <View style={styles.merchantIconCircle}>
-                <Ionicons name="storefront-outline" size={20} color="#0F172A" />
-              </View>
-              <View style={styles.merchantTextGroup}>
-                <Text style={styles.merchantTitle} numberOfLines={2}>
-                  {merchantDisplay}
-                </Text>
-                <View style={styles.merchantDateRow}>
-                  <Text style={styles.merchantDate}>{formatPurchaseDateLong(receipt.purchaseDate)}</Text>
-                  {receipt.sourceType && receipt.sourceType !== 'receipt' && (
-                    <View style={[styles.sourceBadge, { backgroundColor: '#F1F5F9' }]}>
+            {/* Clear Hierarchy: Merchant, Amount, Category, Date */}
+            <View style={styles.heroSection}>
+              <Text style={styles.heroMerchant} numberOfLines={2}>{merchantDisplay}</Text>
+              <Text style={styles.heroAmount}>{formatRupiah(receipt.totalAmount)}</Text>
+              
+              <View style={styles.heroMetaRow}>
+                <View style={[styles.heroCategoryBadge, { backgroundColor: primaryMeta.color + '15' }]}>
+                  <Ionicons name={primaryMeta.icon as any} size={14} color={primaryMeta.color} />
+                  <Text style={[styles.heroCategoryText, { color: primaryMeta.color }]}>
+                    {primaryCategory.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.heroDate}>{formatPurchaseDateLong(receipt.purchaseDate)}</Text>
+                
+                {!!receipt.sourceType && receipt.sourceType !== 'receipt' && (
+                  <>
+                    <Text style={{ color: '#94A3B8', fontSize: 12 }}>·</Text>
+                    <View style={styles.heroSourceBadge}>
                       <Ionicons 
                         name={DOCUMENT_TYPE_META[receipt.sourceType as SourceType]?.icon || 'document-text-outline'} 
                         size={10} 
                         color="#64748B" 
                         style={{ marginRight: 2 }} 
                       />
-                      <Text style={styles.sourceBadgeText}>
+                      <Text style={styles.heroSourceBadgeText}>
                         {DOCUMENT_TYPE_META[receipt.sourceType as SourceType]?.label.toUpperCase() || 'DOCUMENT'}
                       </Text>
                     </View>
-                  )}
-                </View>
+                  </>
+                )}
               </View>
+
+              {receipt.isSharedExpense && receipt.originalReceiptData ? (
+                <View style={styles.sharedExpenseBanner}>
+                  <Ionicons name="pie-chart" size={16} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sharedExpenseTitle}>Shared Expense</Text>
+                    <Text style={styles.sharedExpenseText}>
+                      Original receipt was {formatRupiah(JSON.parse(receipt.originalReceiptData).totalAmount)}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => router.push({ pathname: '/split/[id]', params: { id: receipt.id } })}
+                  style={styles.splitBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="people" size={16} color={colors.primary} />
+                  <Text style={styles.splitBtnText}>Split Bill</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
-            <Text style={styles.sectionTitle}>Items ({receipt.items.length})</Text>
+            <Text style={styles.sectionTitle}>Transaction Details</Text>
           </View>
         }
         renderItem={({ item, index }) => {
@@ -217,9 +251,62 @@ export default function ReceiptDetailScreen() {
                 <Text style={styles.totalValue}>{formatRupiah(receipt.totalAmount)}</Text>
               </View>
             </View>
+
+            {receipt.imageUri && (
+              <View style={styles.imageCard}>
+                <Text style={styles.sectionLabel}>ORIGINAL RECEIPT</Text>
+                <TouchableOpacity 
+                  style={styles.imageWrapper} 
+                  onPress={() => setIsViewerVisible(true)}
+                  activeOpacity={0.8}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel="View full receipt image"
+                >
+                  <Image 
+                    source={{ uri: receipt.imageUri }} 
+                    style={styles.receiptImage} 
+                    resizeMode="cover" 
+                  />
+                  <View style={styles.expandOverlay}>
+                    <Ionicons name="expand-outline" size={24} color="#FFF" />
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         }
       />
+
+      <Modal visible={isViewerVisible} transparent={false} animationType="fade" onRequestClose={() => setIsViewerVisible(false)}>
+        <SafeAreaView style={styles.viewerContainer}>
+          <StatusBar barStyle="light-content" />
+          <View style={styles.viewerHeader}>
+            <TouchableOpacity 
+              onPress={() => setIsViewerVisible(false)}
+              style={styles.viewerCloseBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Close receipt viewer"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close" size={28} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            style={styles.viewerScroll}
+            contentContainerStyle={styles.viewerScrollContent}
+            maximumZoomScale={4}
+            minimumZoomScale={1}
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+          >
+            <Image 
+              source={{ uri: receipt?.imageUri || '' }} 
+              style={styles.viewerImage} 
+              resizeMode="contain" 
+            />
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -259,61 +346,101 @@ const styles = StyleSheet.create({
   headerSection: {
     marginBottom: spacing.xs + 2,
   },
-  merchantCard: {
-    flexDirection: 'row',
+  heroSection: {
+    paddingVertical: spacing.md,
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    marginBottom: spacing.sm,
   },
-  merchantIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+  heroMerchant: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 16,
+    color: '#64748B',
+    textAlign: 'center',
+    marginBottom: 4,
   },
-  merchantTextGroup: {
-    flex: 1,
-  },
-  merchantTitle: {
+  heroAmount: {
     fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 17,
+    fontSize: 36,
     color: '#0F172A',
-    letterSpacing: -0.3,
+    textAlign: 'center',
+    letterSpacing: -1,
+    marginBottom: spacing.md,
   },
-  merchantDateRow: {
+  heroMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
     gap: 8,
   },
-  merchantDate: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-    color: '#64748B',
-  },
-  sourceBadge: {
+  heroCategoryBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 4,
   },
-  sourceBadgeText: {
+  heroCategoryText: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 11,
+    letterSpacing: 0.4,
+  },
+  heroDate: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 13,
+    color: '#64748B',
+  },
+  heroSourceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroSourceBadgeText: {
     fontFamily: 'Manrope_700Bold',
     fontSize: 10,
     color: '#64748B',
     letterSpacing: 0.4,
   },
-  sectionTitle: {
+  splitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: radius.pill,
+    alignSelf: 'flex-start',
+  },
+  splitBtnText: {
     fontFamily: 'Manrope_700Bold',
-    fontSize: 14,
+    fontSize: 13,
+    color: colors.primary,
+  },
+  sharedExpenseBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    padding: 12,
+    borderRadius: radius.md,
+    marginTop: spacing.md,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  sharedExpenseTitle: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 13,
+    color: '#1E3A8A',
+    marginBottom: 2,
+  },
+  sharedExpenseText: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 12,
+    color: '#1E3A8A',
+  },
+  sectionTitle: {
+    fontFamily: 'Manrope_800ExtraBold',
+    fontSize: 13,
     color: '#0F172A',
     marginBottom: spacing.xs + 2,
     letterSpacing: -0.2,
@@ -408,6 +535,28 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     textAlign: 'right',
   },
+  sectionLabel: {
+    fontFamily: 'Manrope_800ExtraBold',
+    fontSize: 12,
+    color: '#64748B',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  imageCard: {
+    marginTop: spacing.xl,
+  },
+  imageWrapper: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    height: 400,
+  },
+  receiptImage: {
+    width: '100%',
+    height: '100%',
+  },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -428,5 +577,40 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     letterSpacing: -0.5,
     textAlign: 'right',
+  },
+  expandOverlay: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderRadius: radius.pill,
+    padding: 6,
+  },
+  viewerContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  viewerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: spacing.md,
+    zIndex: 10,
+  },
+  viewerCloseBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: radius.pill,
+    padding: 4,
+  },
+  viewerScroll: {
+    flex: 1,
+  },
+  viewerScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerImage: {
+    width: '100%',
+    height: '100%',
   },
 });

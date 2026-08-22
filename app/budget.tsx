@@ -17,7 +17,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { getBudgets, setBudgets } from '../db/queries';
 import { CATEGORIES, getCategoryMeta } from '../constants/categories';
 import { parseRupiahInput } from '../lib/money';
-import { colors, spacing, radius } from '../constants/theme';
+import { colors, spacing, radius, typography } from '../constants/theme';
 import Button from '../components/Button';
 import StateView from '../components/StateView';
 
@@ -144,9 +144,9 @@ export default function BudgetScreen() {
                 <View style={styles.inputWrap}>
                   <Text style={styles.inputPrefix}>Rp</Text>
                   <TextInput
-                    style={styles.input}
-                    placeholder="No limit"
-                    placeholderTextColor="#94A3B8"
+                    style={[styles.input, values[category] ? styles.inputActive : null]}
+                    placeholder="Set limit"
+                    placeholderTextColor={colors.textTertiary}
                     keyboardType="number-pad"
                     value={values[category] ?? ''}
                     onChangeText={(v) => setValues((prev) => ({ ...prev, [category]: v }))}
@@ -173,23 +173,22 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#FAFAFA' },
   scrollContent: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: 40 },
   hint: { 
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13, 
-    color: '#64748B', 
+    ...typography.bodySecondary,
+    color: colors.textSecondary,
     lineHeight: 18, 
     marginBottom: spacing.md 
   },
   groupedContainer: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     overflow: 'hidden',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     paddingVertical: 12,
     paddingHorizontal: spacing.md,
   },
@@ -202,8 +201,8 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.md,
   },
   rowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   iconBadge: {
     width: 34,
@@ -215,33 +214,32 @@ const styles = StyleSheet.create({
   },
   categoryName: { 
     flex: 1, 
-    fontFamily: 'Manrope_700Bold', 
-    fontSize: 15, 
-    color: '#0F172A' 
+    ...typography.h4,
   },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    backgroundColor: colors.background,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
     width: 140,
   },
   inputPrefix: { 
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13, 
-    color: '#94A3B8', 
+    ...typography.caption,
     marginRight: 4 
   },
   input: {
     flex: 1,
     paddingVertical: 7,
-    fontSize: 14,
-    color: '#0F172A',
-    fontFamily: 'Manrope_700Bold',
+    ...typography.bodySecondary,
+    color: colors.textTertiary, // Default color for empty
     textAlign: 'right',
+  },
+  inputActive: {
+    ...typography.numberSecondary,
+    color: colors.primary,
   },
   saveBar: {
     paddingHorizontal: spacing.md,

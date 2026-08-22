@@ -92,7 +92,7 @@ export default function RootLayout() {
         >
           <Stack.Screen
             name="confirm"
-            options={{ headerShown: true, title: 'Confirm Items', presentation: 'modal' }}
+            options={{ headerShown: false, presentation: 'modal' }}
           />
           <Stack.Screen
             name="receipt/[id]"
@@ -109,6 +109,10 @@ export default function RootLayout() {
           <Stack.Screen
             name="budget"
             options={{ headerShown: true, title: 'Monthly Budgets', presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="split/[id]"
+            options={{ headerShown: false, presentation: 'modal' }}
           />
         </Stack>
       </SQLiteProvider>

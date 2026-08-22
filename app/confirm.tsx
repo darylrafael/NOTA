@@ -13,13 +13,14 @@ import {
   ActivityIndicator,
   StatusBar,
 } from 'react-native';
+
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSQLiteContext } from 'expo-sqlite';
 import { randomUUID } from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { saveReceipt, updateReceipt, getReceiptDetail } from '../db/queries';
+import { saveReceipt, updateReceipt, getReceiptDetail, getMerchantPreference, saveMerchantPreference } from '../db/queries';
 import { formatRupiah } from '../lib/format';
 import { parseRupiahInput, parseQuantityInput, roundRupiah } from '../lib/money';
 import {
@@ -33,9 +34,10 @@ import {
 import { calculatedReceiptTotal, reconcileTotals } from '../lib/receiptMath';
 import { getCategoryMeta } from '../constants/categories';
 import { DOCUMENT_TYPE_META } from '../constants/documentTypes';
-import { colors, spacing, radius } from '../constants/theme';
+import { colors, spacing, radius, typography } from '../constants/theme';
 import Button from '../components/Button';
 import CategoryPickerModal from '../components/CategoryPickerModal';
+import AnimatedNumber from '../components/AnimatedNumber';
 import { EditableReceiptItem, SourceType } from '../types/receipt';
 
 function createBlankItem(): EditableReceiptItem {
@@ -83,6 +85,74 @@ function parseOptionalTotal(raw?: string): number | null {
   return Math.round(n);
 }
 
+function DateEditorInputs({
+  purchaseDate,
+  onChange,
+  styles
+}: {
+  purchaseDate: string;
+  onChange: (d: string) => void;
+  styles: any;
+}) {
+  const parts = dateOnlyToDate(purchaseDate);
+  const [day, setDay] = useState(String(parts.getDate()));
+  const [month, setMonth] = useState(String(parts.getMonth() + 1));
+  const [year, setYear] = useState(String(parts.getFullYear()));
+
+  useEffect(() => {
+    setDay(String(parts.getDate()));
+    setMonth(String(parts.getMonth() + 1));
+    setYear(String(parts.getFullYear()));
+  }, [purchaseDate]);
+
+  const flush = (d: string, m: string, y: string) => {
+    const dn = Number(d.replace(/[^\d]/g, ''));
+    const mn = Number(m.replace(/[^\d]/g, ''));
+    const yn = Number(y.replace(/[^\d]/g, ''));
+    if (dn > 0 && mn > 0 && yn >= 2000 && yn <= 2100) {
+      const { fromDateParts, toDateOnly } = require('../lib/date');
+      const next = fromDateParts(yn, mn - 1, dn);
+      if (next && next <= toDateOnly(new Date())) {
+        onChange(next);
+      }
+    }
+  };
+
+  return (
+    <View style={styles.dateInputs}>
+      <TextInput
+        style={styles.datePartInput}
+        keyboardType="number-pad"
+        value={day}
+        onChangeText={v => { setDay(v); flush(v, month, year); }}
+        onBlur={() => setDay(String(parts.getDate()))}
+        accessibilityLabel="Day"
+        maxLength={2}
+      />
+      <Text style={styles.datePartSep}>/</Text>
+      <TextInput
+        style={styles.datePartInput}
+        keyboardType="number-pad"
+        value={month}
+        onChangeText={v => { setMonth(v); flush(day, v, year); }}
+        onBlur={() => setMonth(String(parts.getMonth() + 1))}
+        accessibilityLabel="Month"
+        maxLength={2}
+      />
+      <Text style={styles.datePartSep}>/</Text>
+      <TextInput
+        style={[styles.datePartInput, styles.dateYearInput]}
+        keyboardType="number-pad"
+        value={year}
+        onChangeText={v => { setYear(v); flush(day, month, v); }}
+        onBlur={() => setYear(String(parts.getFullYear()))}
+        accessibilityLabel="Year"
+        maxLength={4}
+      />
+    </View>
+  );
+}
+
 export default function ConfirmScreen() {
   const params = useLocalSearchParams<{
     items?: string;
@@ -96,6 +166,7 @@ export default function ConfirmScreen() {
     purchaseDate?: string;
     dateExtracted?: string;
     hadParsingIssues?: string;
+    imageUri?: string;
   }>();
   const router = useRouter();
   const db = useSQLiteContext();
@@ -113,9 +184,11 @@ export default function ConfirmScreen() {
   const [serviceCharge, setServiceCharge] = useState(Number(params.serviceCharge) || 0);
   const [discount, setDiscount] = useState(Number(params.discount) || 0);
   const extractedDate = parsePurchaseDate(params.purchaseDate);
-  const [purchaseDate, setPurchaseDate] = useState(extractedDate ?? todayDateOnly());
+  const isFromScan = !!params.items && !isEditMode;
+  // If it's a new scan and AI couldn't find a date, leave it blank to force user review.
+  const [purchaseDate, setPurchaseDate] = useState(extractedDate ?? (isFromScan ? '' : todayDateOnly()));
   const [dateExtracted, setDateExtracted] = useState(params.dateExtracted === '1' && !!extractedDate);
-  const [showDateEditor, setShowDateEditor] = useState(false);
+  const [showDateEditor, setShowDateEditor] = useState(!extractedDate && isFromScan);
   const [ocrTotal] = useState<number | null>(() => parseOptionalTotal(params.receiptTotal));
   const [isLoading, setIsLoading] = useState(isEditMode);
   const [isSaving, setIsSaving] = useState(false);
@@ -127,6 +200,19 @@ export default function ConfirmScreen() {
   );
   const hadParsingIssues = params.hadParsingIssues === '1';
 
+  const initialCategoriesRef = useRef<Record<string, string>>({});
+  const initialMerchantRef = useRef<string>(params.merchantName ?? '');
+  const [prefLoaded, setPrefLoaded] = useState(false);
+
+  useEffect(() => {
+    // Populate initial ref for manual edit tracking
+    if (Object.keys(initialCategoriesRef.current).length === 0 && items.length > 0) {
+      items.forEach(item => {
+        initialCategoriesRef.current[item.localId] = item.category;
+      });
+    }
+  }, [items]);
+
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
@@ -134,6 +220,24 @@ export default function ConfirmScreen() {
       }
     };
   }, []);
+
+  // Apply Merchant Preference
+  useEffect(() => {
+    let isActive = true;
+    async function applyPref() {
+      if (!isFromScan || !merchantName || prefLoaded) return;
+      const prefCategory = await getMerchantPreference(db, merchantName);
+      if (prefCategory && isActive) {
+        setItems(prev => prev.map(item => ({ ...item, category: prefCategory })));
+        // Update the initial categories ref so we know THIS was the starting point
+        // before user interaction, avoiding prompting them if they don't change it.
+        initialCategoriesRef.current = {};
+      }
+      if (isActive) setPrefLoaded(true);
+    }
+    applyPref();
+    return () => { isActive = false; };
+  }, [db, isFromScan, merchantName, prefLoaded]);
 
   useFocusEffect(
     useCallback(() => {
@@ -143,6 +247,15 @@ export default function ConfirmScreen() {
         try {
           const detail = await getReceiptDetail(db, params.receiptId!);
           if (detail && isActive) {
+            if (detail.isSharedExpense) {
+              Alert.alert(
+                'Cannot Edit Shared Expense', 
+                'This receipt has been modified to only reflect your personal portion. To change it, please delete this receipt and scan it again.',
+                [{ text: 'OK', onPress: () => router.back() }]
+              );
+              return;
+            }
+
             setItems(
               detail.items.map((item) => ({
                 localId: randomUUID(),
@@ -183,8 +296,30 @@ export default function ConfirmScreen() {
   );
 
   const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+  const previousItemsTotalRef = useRef(itemsTotal);
+
+  useEffect(() => {
+    const prev = previousItemsTotalRef.current;
+    if (prev > 0 && itemsTotal > 0 && itemsTotal !== prev) {
+      const ratio = itemsTotal / prev;
+      setTax((t) => Math.round(t * ratio));
+      setServiceCharge((s) => Math.round(s * ratio));
+      setDiscount((d) => Math.round(d * ratio));
+    } else if (itemsTotal === 0 && prev > 0) {
+      setTax(0);
+      setServiceCharge(0);
+      setDiscount(0);
+    }
+    previousItemsTotalRef.current = itemsTotal;
+  }, [itemsTotal]);
+
   const total = calculatedReceiptTotal({ items, tax, serviceCharge, discount });
   const reconciliation = fromScan ? reconcileTotals(total, ocrTotal) : { status: 'ocr_missing' as const, difference: 0 };
+  const isSuspiciousTax =
+    fromScan &&
+    tax > 0 &&
+    itemsTotal > 0 &&
+    ((tax <= 30 && itemsTotal >= 1000) || (itemsTotal >= 10000 && tax / itemsTotal < 0.01));
 
   function updateItem(localId: string, field: 'name' | 'price' | 'quantity' | 'lineTotal', value: string) {
     setItems((prev) =>
@@ -240,7 +375,9 @@ export default function ConfirmScreen() {
   }
 
   async function handleSave() {
-    if (items.length === 0) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    if (itemsTotal <= 0) {
       Alert.alert('No Items', 'Add at least one item before saving.');
       return;
     }
@@ -280,22 +417,64 @@ export default function ConfirmScreen() {
             tax,
             serviceCharge,
             sourceType,
-            discount
+            discount,
+            params.imageUri
           );
         }
 
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        setShowToast(true);
-        toastTimeoutRef.current = setTimeout(() => {
-          if (isEditMode && params.receiptId) {
-            router.replace(`/receipt/${params.receiptId}`);
-          } else {
-            router.replace('/');
+        const finalMerchant = merchantName.trim();
+        const performNavigate = () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          setShowToast(true);
+          toastTimeoutRef.current = setTimeout(() => {
+            if (isEditMode && params.receiptId) {
+              router.replace(`/receipt/${params.receiptId}`);
+            } else {
+              router.dismissAll();
+            }
+          }, 800);
+        };
+
+        if (finalMerchant) {
+          let anyChanged = false;
+          const finalCategories = new Set(items.map(i => i.category));
+          
+          for (const item of items) {
+            const initialCat = initialCategoriesRef.current[item.localId];
+            if (initialCat && initialCat !== item.category) {
+              anyChanged = true;
+            }
           }
-        }, 1500);
-      } catch {
+          
+          if (anyChanged && finalCategories.size === 1) {
+            const finalCategory = items[0].category;
+            const existingPref = await getMerchantPreference(db, finalMerchant);
+            
+            if (existingPref !== finalCategory) {
+              const isUpdate = !!existingPref;
+              setIsSaving(false); // Stop loading indicator while alert is showing
+              Alert.alert(
+                isUpdate ? `Update ${finalMerchant} preference?` : 'Remember this?',
+                `Use ${finalCategory.toUpperCase()} for future ${finalMerchant} transactions?`,
+                [
+                  { text: 'Not Now', style: 'cancel', onPress: performNavigate },
+                  { text: isUpdate ? 'Update' : 'Remember', style: 'default', onPress: async () => {
+                      await saveMerchantPreference(db, finalMerchant, finalCategory);
+                      performNavigate();
+                  }}
+                ]
+              );
+              return;
+            }
+          }
+        }
+
+        performNavigate();
+      } catch (err) {
+        console.error('[confirm.tsx] Save error:', err);
         setIsSaving(false);
-        Alert.alert('Save Failed', 'Could not save this receipt. Please try again.');
+        const message = err instanceof Error ? err.message : 'Could not save this receipt. Please try again.';
+        Alert.alert('Save Failed', message);
       }
     };
 
@@ -358,22 +537,16 @@ export default function ConfirmScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
     >
       <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
-      <Stack.Screen
-        options={{
-          title: isEditMode ? 'Edit Receipt' : 'Review items',
-          headerBackTitle: 'Cancel',
-          headerTitleStyle: {
-            fontFamily: 'Manrope_700Bold',
-            fontSize: 16,
-            color: '#0F172A',
-          },
-          headerLeft: () => (
-            <TouchableOpacity onPress={handleCancel} style={styles.cancelHeaderButton} activeOpacity={0.7}>
-              <Text style={styles.cancelHeaderText}>Cancel</Text>
-            </TouchableOpacity>
-          ),
-        }}
-      />
+      <View style={styles.modalHeader}>
+        <View style={styles.dragIndicator} />
+        <View style={styles.modalHeaderContent}>
+          <TouchableOpacity onPress={handleCancel} hitSlop={{top:10, bottom:10, left:10, right:10}}>
+            <Text style={styles.cancelHeaderText}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>{isEditMode ? 'Edit Receipt' : 'Review Items'}</Text>
+          <View style={{ width: 45 }} />
+        </View>
+      </View>
       <CategoryPickerModal
         visible={!!pickerTargetId}
         selectedCategory={selectedItemForPicker?.category}
@@ -391,9 +564,9 @@ export default function ConfirmScreen() {
       >
         {fromScan && (
           <View style={styles.trustBanner}>
-            <Ionicons name="sparkles-outline" size={16} color="#0F172A" />
+            <Ionicons name="document-text-outline" size={16} color={colors.textPrimary} />
             <Text style={styles.trustBannerText}>
-              AI extracted this from your document. Check it, then save.
+              Extracted from receipt. Please verify before saving.
             </Text>
           </View>
         )}
@@ -451,9 +624,9 @@ export default function ConfirmScreen() {
               <Text style={styles.dateValue}>{formatPurchaseDate(purchaseDate)}</Text>
               <Text style={styles.dateHint}>
                 {dateExtracted
-                  ? 'Tap to correct'
+                  ? 'Found on document'
                   : fromScan
-                    ? 'Date not found on the document — using today. Tap to set the real date.'
+                    ? "Couldn't find the date, please set one."
                     : 'Tap to change'}
               </Text>
             </View>
@@ -464,31 +637,7 @@ export default function ConfirmScreen() {
               <TouchableOpacity onPress={() => shiftDate(-1)} accessibilityLabel="Previous day" style={styles.dateStepBtn}>
                 <Ionicons name="chevron-back" size={18} color="#0F172A" />
               </TouchableOpacity>
-              <View style={styles.dateInputs}>
-                <TextInput
-                  style={styles.datePartInput}
-                  keyboardType="number-pad"
-                  value={String(dateParts.getDate())}
-                  onChangeText={(v) => handleDatePartChange('day', v)}
-                  accessibilityLabel="Day"
-                />
-                <Text style={styles.datePartSep}>/</Text>
-                <TextInput
-                  style={styles.datePartInput}
-                  keyboardType="number-pad"
-                  value={String(dateParts.getMonth() + 1)}
-                  onChangeText={(v) => handleDatePartChange('month', v)}
-                  accessibilityLabel="Month"
-                />
-                <Text style={styles.datePartSep}>/</Text>
-                <TextInput
-                  style={[styles.datePartInput, styles.dateYearInput]}
-                  keyboardType="number-pad"
-                  value={String(dateParts.getFullYear())}
-                  onChangeText={(v) => handleDatePartChange('year', v)}
-                  accessibilityLabel="Year"
-                />
-              </View>
+              <DateEditorInputs purchaseDate={purchaseDate} onChange={(v) => { setPurchaseDate(v); setDateExtracted(true); }} styles={styles} />
               <TouchableOpacity onPress={() => shiftDate(1)} accessibilityLabel="Next day" style={styles.dateStepBtn}>
                 <Ionicons name="chevron-forward" size={18} color="#0F172A" />
               </TouchableOpacity>
@@ -587,12 +736,12 @@ export default function ConfirmScreen() {
           <View style={styles.summaryContainer}>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Subtotal</Text>
-              <Text style={styles.summaryValue}>{formatRupiah(itemsTotal)}</Text>
+              <AnimatedNumber value={itemsTotal} formatter={formatRupiah} style={styles.summaryValue} />
             </View>
 
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Tax (Pajak / PB1 / PPN)</Text>
-              <View style={styles.chargeInputRow}>
+              <View style={[styles.chargeInputRow, isSuspiciousTax && styles.chargeInputRowWarning]}>
                 <Text style={styles.currencyPrefix}>Rp</Text>
                 <TextInput
                   style={styles.chargeInput}
@@ -604,6 +753,11 @@ export default function ConfirmScreen() {
                 />
               </View>
             </View>
+            {isSuspiciousTax && (
+              <Text style={styles.suspiciousTaxHint}>
+                Tax amount (Rp{tax}) looks unusually low or like a percentage rate. Please check and adjust if needed.
+              </Text>
+            )}
 
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Service Charge</Text>
@@ -637,15 +791,25 @@ export default function ConfirmScreen() {
 
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Your total</Text>
-              <Text style={styles.totalValue}>{formatRupiah(total)}</Text>
+              <AnimatedNumber value={total} formatter={formatRupiah} style={styles.totalValue} />
             </View>
 
             {fromScan && reconciliation.status === 'match' && ocrTotal !== null && (
-              <Text style={styles.matchHint}>
-                {reconciliation.difference === 0
-                  ? `Matches the receipt total (${formatRupiah(ocrTotal)})`
-                  : `Within Rp100 of the receipt total (${formatRupiah(ocrTotal)})`}
-              </Text>
+              <View style={styles.matchBadge}>
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <Text style={styles.matchHintText}>
+                  Total matches receipt ({formatRupiah(ocrTotal)})
+                </Text>
+              </View>
+            )}
+
+            {fromScan && reconciliation.status === 'small_difference' && ocrTotal !== null && (
+              <View style={styles.smallDiffContainer}>
+                <Ionicons name="information-circle-outline" size={14} color={colors.warning} />
+                <Text style={styles.smallDiffText}>
+                  Off by {formatRupiah(Math.abs(reconciliation.difference))} ({reconciliation.difference > 0 ? '+' : '-'}{formatRupiah(Math.abs(reconciliation.difference))} vs printed {formatRupiah(ocrTotal)}) — check tax, discount, or items
+                </Text>
+              </View>
             )}
 
             {fromScan && reconciliation.status === 'ocr_missing' && (
@@ -697,7 +861,37 @@ export default function ConfirmScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#FAFAFA' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAFAFA' },
-  scrollContent: { paddingHorizontal: spacing.md, paddingTop: spacing.xs, paddingBottom: 30 },
+  modalHeader: {
+    backgroundColor: '#FAFAFA',
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    alignItems: 'center',
+  },
+  dragIndicator: {
+    width: 36,
+    height: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.border,
+    marginBottom: 12,
+  },
+  modalHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingHorizontal: spacing.md,
+  },
+  modalTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+  },
+  cancelHeaderText: {
+    ...typography.body,
+    color: colors.primary,
+  },
+  scrollContent: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: 30 },
   sectionBlock: {
     marginBottom: spacing.md,
   },
@@ -792,14 +986,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFBEB',
   },
   dateValue: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 16,
-    color: '#0F172A',
+    ...typography.numberPrimary,
   },
   dateHint: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-    color: '#64748B',
+    ...typography.caption,
     marginTop: 2,
     paddingRight: 12,
   },
@@ -941,22 +1131,17 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   currencySymbol: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#94A3B8',
+    ...typography.caption,
     marginRight: 2,
   },
   priceInput: {
-    fontFamily: 'Manrope_700Bold',
+    ...typography.numberSecondary,
     minWidth: 58,
-    color: '#0F172A',
-    fontSize: 13,
     padding: 0,
   },
   multiplySign: {
-    color: '#94A3B8',
+    ...typography.caption,
     marginHorizontal: 8,
-    fontFamily: 'Manrope_600SemiBold',
   },
   lineTotalWrap: {
     flex: 1,
@@ -964,17 +1149,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
   lineTotalInput: {
-    fontFamily: 'Manrope_800ExtraBold',
+    ...typography.numberPrimary,
+    fontSize: 15,
     minWidth: 64,
-    color: '#0F172A',
-    fontSize: 14,
     textAlign: 'right',
     padding: 0,
   },
@@ -998,14 +1182,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   summaryLabel: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13,
-    color: '#64748B',
+    ...typography.caption,
   },
   summaryValue: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 14,
-    color: '#0F172A',
+    ...typography.numberSecondary,
   },
   chargeInputRow: {
     flexDirection: 'row',
@@ -1018,15 +1198,11 @@ const styles = StyleSheet.create({
     borderColor: '#E2E8F0',
   },
   currencyPrefix: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#94A3B8',
+    ...typography.caption,
     marginRight: 4,
   },
   chargeInput: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 13,
-    color: '#0F172A',
+    ...typography.numberSecondary,
     minWidth: 70,
     textAlign: 'right',
     padding: 0,
@@ -1037,16 +1213,58 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 10,
     marginTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
-  totalLabel: { fontFamily: 'Manrope_800ExtraBold', fontSize: 16, color: '#0F172A' },
-  totalValue: { fontFamily: 'Manrope_800ExtraBold', fontSize: 18, color: '#0F172A', letterSpacing: -0.4 },
-  matchHint: {
+  totalLabel: { ...typography.h3 },
+  totalValue: { ...typography.numberPrimary },
+  chargeInputRowWarning: {
+    borderColor: colors.warning,
+    backgroundColor: '#FFFBEB',
+  },
+  suspiciousTaxHint: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    color: '#92400E',
+    marginTop: -4,
+    marginBottom: 6,
+    lineHeight: 15,
+  },
+  matchBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+    backgroundColor: '#F0FDF4',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+  },
+  matchHintText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 13,
+    color: '#166534',
+  },
+  smallDiffContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#FFFBEB',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FEF3C7',
+  },
+  smallDiffText: {
+    flex: 1,
     fontFamily: 'Manrope_600SemiBold',
     fontSize: 12,
-    color: colors.success,
+    color: '#92400E',
+    lineHeight: 16,
   },
   missingHint: {
     marginTop: 8,
@@ -1095,11 +1313,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     paddingRight: spacing.sm,
   },
-  cancelHeaderText: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 15,
-    color: '#64748B',
-  },
+
   discardButton: {
     paddingVertical: 8,
     alignItems: 'center',

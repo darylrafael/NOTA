@@ -1,6 +1,6 @@
-﻿import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing } from '../constants/theme';
+import { colors, spacing, typography } from '../constants/theme';
 import Button from './Button';
 
 interface StateViewProps {
@@ -13,6 +13,8 @@ interface StateViewProps {
   primaryLoading?: boolean;
   secondaryLabel?: string;
   onSecondaryPress?: () => void;
+  tertiaryLabel?: string;
+  onTertiaryPress?: () => void;
 }
 
 export default function StateView({
@@ -25,6 +27,8 @@ export default function StateView({
   primaryLoading,
   secondaryLabel,
   onSecondaryPress,
+  tertiaryLabel,
+  onTertiaryPress,
 }: StateViewProps) {
   const iconBg = iconTone === 'error' ? colors.errorBg : colors.primaryMuted;
   const iconColor = iconTone === 'error' ? colors.error : colors.primary;
@@ -48,6 +52,12 @@ export default function StateView({
           <Text style={styles.secondaryLinkText}>{secondaryLabel}</Text>
         </TouchableOpacity>
       )}
+
+      {tertiaryLabel && onTertiaryPress && (
+        <TouchableOpacity onPress={onTertiaryPress} style={styles.tertiaryLink} accessibilityRole="button">
+          <Text style={styles.tertiaryLinkText}>{tertiaryLabel}</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -69,15 +79,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   title: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 19,
-    color: colors.textPrimary,
+    ...typography.h3,
     textAlign: 'center',
     marginBottom: spacing.xs,
   },
   subtitle: {
-    fontSize: 15,
-    color: colors.textSecondary,
+    ...typography.body,
     textAlign: 'center',
     lineHeight: 21,
     marginBottom: spacing.xl,
@@ -91,5 +98,13 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  secondaryLinkText: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: colors.primary },
+  secondaryLinkText: { ...typography.body, color: colors.primary },
+  tertiaryLink: {
+    marginTop: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  tertiaryLinkText: { ...typography.body, color: colors.textSecondary },
 });

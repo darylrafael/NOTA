@@ -13,12 +13,17 @@ export interface CategoryForecast {
   projectedEndOfMonth: number;
   previousMonthTotal: number | null;
   monthOverMonthPercent: number | null;
+  monthOverMonthDiff: number | null;
+  isNewCategory: boolean;
+  isLowBaseline: boolean;
 }
 
 export interface ForecastInsight {
   category: string;
   percentChange: number;
 }
+
+export const MIN_MOM_BASELINE = 10_000;
 
 function sumByCategoryForMonth(
   records: ItemSpendRecord[],
@@ -76,10 +81,18 @@ export function calculateForecast(
     const projectedEndOfMonth = totalThisMonth + movingDailyAverage * daysRemaining;
 
     const previousMonthTotal = previousTotals.get(category) ?? null;
-    const monthOverMonthPercent =
-      previousMonthTotal && previousMonthTotal > 0
-        ? Math.round(((totalThisMonth - previousMonthTotal) / previousMonthTotal) * 100)
-        : null;
+    const isNewCategory = previousMonthTotal === null || previousMonthTotal === 0;
+    const isLowBaseline = previousMonthTotal !== null && previousMonthTotal > 0 && previousMonthTotal < MIN_MOM_BASELINE;
+    
+    let monthOverMonthPercent: number | null = null;
+    let monthOverMonthDiff: number | null = null;
+
+    if (previousMonthTotal !== null) {
+      monthOverMonthDiff = Math.round(totalThisMonth - previousMonthTotal);
+      if (!isNewCategory && !isLowBaseline) {
+        monthOverMonthPercent = Math.round(((totalThisMonth - previousMonthTotal) / previousMonthTotal) * 100);
+      }
+    }
 
     results.push({
       category,
@@ -88,10 +101,37 @@ export function calculateForecast(
       projectedEndOfMonth: Math.round(projectedEndOfMonth),
       previousMonthTotal: previousMonthTotal !== null ? Math.round(previousMonthTotal) : null,
       monthOverMonthPercent,
+      monthOverMonthDiff,
+      isNewCategory,
+      isLowBaseline,
     });
   }
 
   return results.sort((a, b) => b.totalThisMonth - a.totalThisMonth);
+}
+
+/**
+ * Shared source of truth for the biggest spending category this month.
+ * Prefer non-'Other' categories; falls back to 'Other' only if it is the only category with spend.
+ */
+export function getTopSpendingCategory(
+  forecastsOrRecords: CategoryForecast[] | ItemSpendRecord[],
+  referenceDate: Date = new Date()
+): { category: string; amount: number } | null {
+  const forecasts =
+    Array.isArray(forecastsOrRecords) && forecastsOrRecords.length > 0 && 'totalThisMonth' in forecastsOrRecords[0]
+      ? (forecastsOrRecords as CategoryForecast[])
+      : calculateForecast(forecastsOrRecords as ItemSpendRecord[], referenceDate);
+
+  const active = forecasts.filter((f) => f.totalThisMonth > 0);
+  if (active.length === 0) return null;
+
+  const nonOther = active.filter((f) => f.category !== 'Other');
+  if (nonOther.length > 0) {
+    return { category: nonOther[0].category, amount: nonOther[0].totalThisMonth };
+  }
+
+  return { category: active[0].category, amount: active[0].totalThisMonth };
 }
 
 // Compares the trailing daily average (last up to 7 days) against the daily

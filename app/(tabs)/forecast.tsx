@@ -5,12 +5,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getAllItemSpend, getBudgets, getTopMerchantsThisMonth, MerchantSummary } from '../../db/queries';
-import { calculateForecast, findBiggestTrendShift, CategoryForecast, ForecastInsight } from '../../lib/forecast';
+import { calculateForecast, findBiggestTrendShift, getTopSpendingCategory, CategoryForecast, ForecastInsight } from '../../lib/forecast';
 import { currentMonthRange } from '../../lib/date';
 import { getCategoryMeta } from '../../constants/categories';
-import { formatRupiah, toTitleCase } from '../../lib/format';
-import { colors, spacing, radius } from '../../constants/theme';
+import { formatRupiah, toTitleCase, normalizeMerchantName } from '../../lib/format';
+import { colors, spacing, radius, typography, shadow } from '../../constants/theme';
 import StateView from '../../components/StateView';
+import AnimatedNumber from '../../components/AnimatedNumber';
+
+function ProgressBar({ percent, color }: { percent: number; color: string }) {
+  const widthPercent = `${Math.min(Math.max(percent, 0), 1) * 100}%`;
+  return <View style={[styles.budgetFill, { width: widthPercent as any, backgroundColor: color }]} />;
+}
 
 export default function ForecastScreen() {
   const db = useSQLiteContext();
@@ -96,7 +102,9 @@ export default function ForecastScreen() {
   }
 
   const maxTotal = Math.max(...forecasts.map((f) => f.totalThisMonth), 1);
-  const topCategory = forecasts[0];
+  const totalCurrent = forecasts.reduce((sum, f) => sum + f.totalThisMonth, 0);
+  const totalProjected = forecasts.reduce((sum, f) => sum + (f.projectedEndOfMonth || f.totalThisMonth), 0);
+  const topCategory = getTopSpendingCategory(forecasts);
 
   return (
     <View style={styles.flex}>
@@ -117,98 +125,78 @@ export default function ForecastScreen() {
                 onPress={() => router.push('/budget')}
                 activeOpacity={0.7}
               >
-                <Ionicons name="options-outline" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
+                <Ionicons name="options-outline" size={14} color={colors.textOnPrimary} style={{ marginRight: 4 }} />
                 <Text style={styles.setBudgetHeaderText}>Budgets</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Top Category Hero Banner */}
-            {topCategory && (
-              <View style={styles.heroCard}>
-                <View style={styles.heroLeft}>
-                  <Text style={styles.heroLabel}>Top Category This Month</Text>
-                  <Text style={styles.heroCategory}>{topCategory.category}</Text>
-                  <Text style={styles.heroAmount}>{formatRupiah(topCategory.totalThisMonth)}</Text>
-                </View>
-                <View style={styles.heroIconBadge}>
-                  <Ionicons name="trending-up" size={24} color="#FFFFFF" />
-                </View>
-              </View>
-            )}
+            {/* Smart Assistant Hero */}
+            <View style={styles.heroCard}>
+              <Text style={styles.heroLabel}>Projected month-end</Text>
+              <AnimatedNumber value={totalProjected} formatter={formatRupiah} style={styles.heroProjectedValue} />
+              
+              <View style={styles.heroDivider} />
 
-            {/* Smart Insight Banner */}
-            {insight && (
-              <View style={styles.insightCard}>
-                <View
-                  style={[
-                    styles.insightIconBadge,
-                    { backgroundColor: insight.percentChange > 0 ? '#FEF2F2' : '#ECFDF5' },
-                  ]}
-                >
-                  <Ionicons
-                    name={insight.percentChange > 0 ? 'arrow-up' : 'arrow-down'}
-                    size={16}
-                    color={insight.percentChange > 0 ? colors.error : colors.success}
-                  />
-                </View>
-                <Text style={styles.insightText}>
-                  Your <Text style={styles.boldText}>{insight.category}</Text> spending is{' '}
-                  <Text style={{ color: insight.percentChange > 0 ? colors.error : colors.success }}>
-                    {Math.abs(insight.percentChange)}% {insight.percentChange > 0 ? 'higher' : 'lower'}
-                  </Text>{' '}
-                  than earlier this month.
-                </Text>
-              </View>
-            )}
-
-            {/* TOP PLACES THIS MONTH SECTION */}
-            {topMerchants.length > 0 && (
-              <View style={styles.merchantSection}>
-                <View style={styles.merchantSectionHeader}>
-                  <Text style={styles.sectionTitle}>Top Places This Month</Text>
-                  <Text style={styles.merchantSectionSub}>By spending</Text>
-                </View>
-
-                <View style={styles.merchantGroupCard}>
-                  {topMerchants.map((m, idx) => {
-                    const isLast = idx === topMerchants.length - 1;
-                    return (
-                      <TouchableOpacity
-                        key={m.merchantName}
-                        style={[styles.merchantRow, !isLast && styles.merchantRowDivider]}
-                        onPress={() => router.push(`/merchant/${encodeURIComponent(m.merchantName)}`)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.merchantRankCircle}>
-                          <Text style={styles.merchantRankText}>{idx + 1}</Text>
-                        </View>
-
-                        <View style={styles.merchantRowDetails}>
-                          <Text style={styles.merchantRowName} numberOfLines={1}>
-                            {m.merchantName}
-                          </Text>
-                          <Text style={styles.merchantRowSub}>
-                            {m.visitCount} transaction{m.visitCount === 1 ? '' : 's'}
-                          </Text>
-                        </View>
-
-                        <View style={styles.merchantRowRight}>
-                          <Text style={styles.merchantRowAmount}>{formatRupiah(m.totalAmount)}</Text>
-                          <Ionicons name="chevron-forward" size={14} color="#94A3B8" style={{ marginLeft: 4 }} />
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
+              <Text style={styles.heroSubNarrative}>
+                You've spent <Text style={styles.heroSubBold}>{formatRupiah(totalCurrent)}</Text> so far.
+                {insight && insight.percentChange > 0
+                  ? ` ${insight.category} spending is unusually high.`
+                  : insight && insight.percentChange < 0
+                    ? ` ${insight.category} spending is remarkably low.`
+                    : topCategory
+                      ? ` ${topCategory.category} is your biggest expense.`
+                      : " You're off to a good start."}
+              </Text>
+            </View>
 
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Category Projections</Text>
             </View>
           </View>
         }
-        renderItem={({ item }) => {
+        ListFooterComponent={
+          topMerchants.length > 0 ? (
+            <View style={[styles.merchantSection, { marginTop: spacing.xl }]}>
+              <View style={styles.merchantSectionHeader}>
+                <Text style={styles.sectionTitle}>Top Places This Month</Text>
+                <Text style={styles.merchantSectionSub}>By spending</Text>
+              </View>
+
+              <View style={styles.merchantGroupCard}>
+                {topMerchants.map((m, idx) => {
+                  const isLast = idx === topMerchants.length - 1;
+                  return (
+                    <TouchableOpacity
+                      key={m.merchantName}
+                      style={[styles.merchantRow, !isLast && styles.merchantRowDivider]}
+                      onPress={() => router.push(`/merchant/${encodeURIComponent(m.merchantName)}`)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.merchantRankCircle}>
+                        <Text style={styles.merchantRankText}>{idx + 1}</Text>
+                      </View>
+
+                      <View style={styles.merchantRowDetails}>
+                        <Text style={styles.merchantRowName} numberOfLines={2}>
+                          {normalizeMerchantName(m.merchantName)}
+                        </Text>
+                        <Text style={styles.merchantRowSub}>
+                          {m.visitCount} transaction{m.visitCount === 1 ? '' : 's'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.merchantRowRight}>
+                        <Text style={styles.merchantRowAmount}>{formatRupiah(m.totalAmount)}</Text>
+                        <Ionicons name="chevron-forward" size={14} color="#94A3B8" style={{ marginLeft: 4 }} />
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null
+        }
+        renderItem={({ item, index }) => {
           const meta = getCategoryMeta(item.category);
           const budgetLimit = budgets[item.category] ?? null;
           const percent = budgetLimit ? item.totalThisMonth / budgetLimit : 0;
@@ -218,11 +206,7 @@ export default function ForecastScreen() {
 
           return (
             <TouchableOpacity
-              style={[
-                styles.categoryCard,
-                isOverBudget && styles.cardOverBudget,
-                isNearBudget && styles.cardNearBudget,
-              ]}
+              style={styles.categoryCard}
               onPress={() => router.push({ pathname: '/category/[name]', params: { name: item.category } })}
               activeOpacity={0.7}
             >
@@ -234,8 +218,22 @@ export default function ForecastScreen() {
                   </View>
                   <View>
                     <Text style={styles.categoryName}>{item.category}</Text>
-                    {isOverBudget ? (
+                    {item.category === 'Other' ? (
+                      <Text style={styles.trendLabelMuted}>Uncategorized & minor expenses</Text>
+                    ) : isOverBudget ? (
                       <Text style={styles.overBudgetLabel}>Over Budget</Text>
+                    ) : item.isNewCategory ? (
+                      <Text style={styles.trendLabelMuted}>New</Text>
+                    ) : item.isLowBaseline && item.monthOverMonthDiff !== null ? (
+                      <Text
+                        style={[
+                          styles.trendLabel,
+                          { color: item.monthOverMonthDiff > 0 ? colors.error : colors.success },
+                        ]}
+                      >
+                        {item.monthOverMonthDiff > 0 ? '+' : ''}
+                        {formatRupiah(item.monthOverMonthDiff)} vs last month
+                      </Text>
                     ) : item.monthOverMonthPercent !== null ? (
                       <Text
                         style={[
@@ -252,28 +250,21 @@ export default function ForecastScreen() {
                   </View>
                 </View>
 
-                <Text style={styles.categoryCurrentTotal}>{formatRupiah(item.totalThisMonth)}</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <AnimatedNumber value={item.projectedEndOfMonth} formatter={formatRupiah} style={styles.projectedValueHero} />
+                  <Text style={styles.projectedLabel}>est. end</Text>
+                </View>
               </View>
 
-              {/* Progress Bar of Category Share */}
-              <View style={styles.barTrack}>
-                <View
-                  style={[
-                    styles.barFill,
-                    { width: `${(item.totalThisMonth / maxTotal) * 100}%`, backgroundColor: meta.color },
-                  ]}
-                />
-              </View>
-
-              {/* Stats Footer: Weekly Avg & Projected End of Month */}
+              {/* Stats Footer: Spent so far & Weekly Avg */}
               <View style={styles.statsRow}>
                 <View style={styles.statCol}>
-                  <Text style={styles.statLabel}>Weekly average</Text>
-                  <Text style={styles.statValue}>{formatRupiah(item.weeklyAverage)}</Text>
+                  <Text style={styles.statLabel}>Spent so far</Text>
+                  <AnimatedNumber value={item.totalThisMonth} formatter={formatRupiah} style={styles.statValue} />
                 </View>
                 <View style={styles.statColRight}>
-                  <Text style={styles.statLabel}>Est. end of month</Text>
-                  <Text style={styles.projectedValue}>{formatRupiah(item.projectedEndOfMonth)}</Text>
+                  <Text style={styles.statLabel}>Weekly average</Text>
+                  <AnimatedNumber value={item.weeklyAverage} formatter={formatRupiah} style={styles.statValue} />
                 </View>
               </View>
 
@@ -281,15 +272,12 @@ export default function ForecastScreen() {
               {budgetLimit ? (
                 <View style={styles.budgetRow}>
                   <View style={styles.budgetTrack}>
-                    <View
-                      style={[
-                        styles.budgetFill,
-                        { width: `${Math.min(percent, 1) * 100}%`, backgroundColor: budgetColor },
-                      ]}
-                    />
+                    <ProgressBar percent={percent} color={budgetColor} />
                   </View>
                   <Text style={styles.budgetText}>
-                    {formatRupiah(item.totalThisMonth)} / {formatRupiah(budgetLimit)} budget
+                    {isOverBudget 
+                      ? `Over by ${formatRupiah(item.totalThisMonth - budgetLimit)}` 
+                      : `${formatRupiah(item.totalThisMonth)} / ${formatRupiah(budgetLimit)} budget`}
                   </Text>
                 </View>
               ) : null}
@@ -314,89 +302,53 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   headerTitle: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 26,
-    color: '#0F172A',
-    letterSpacing: -0.6,
+    ...typography.h1,
   },
   setBudgetHeaderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.primary,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: radius.pill,
   },
   setBudgetHeaderText: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 12,
-    color: '#FFFFFF',
+    ...typography.caption,
+    color: colors.textOnPrimary,
   },
   heroCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    ...shadow.card,
   },
-  heroLeft: { flex: 1 },
   heroLabel: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 11,
-    color: '#94A3B8',
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    letterSpacing: 0.5,
   },
-  heroCategory: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 18,
-    color: '#FFFFFF',
-    marginTop: 2,
+  heroProjectedValue: {
+    ...typography.h1,
+    fontSize: 32,
+    color: colors.textPrimary,
   },
-  heroAmount: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 14,
-    color: '#CBD5E1',
-    marginTop: 2,
+  heroDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
   },
-  heroIconBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  heroSubNarrative: {
+    ...typography.bodySecondary,
+    lineHeight: 22,
   },
-  insightCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    gap: 12,
-  },
-  insightIconBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  insightText: {
-    flex: 1,
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13,
-    color: '#334155',
-    lineHeight: 18,
-  },
-  boldText: {
-    fontFamily: 'Manrope_700Bold',
-    color: '#0F172A',
+  heroSubBold: {
+    ...typography.h4,
+    color: colors.textPrimary,
   },
   merchantSection: {
     marginBottom: spacing.md,
@@ -408,16 +360,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs + 2,
   },
   merchantSectionSub: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-    color: '#94A3B8',
+    ...typography.caption,
   },
   merchantGroupCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     overflow: 'hidden',
+    ...shadow.card,
   },
   merchantRow: {
     flexDirection: 'row',
@@ -426,71 +377,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   merchantRowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   merchantRankCircle: {
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
   },
   merchantRankText: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 12,
-    color: '#0F172A',
+    ...typography.numberSecondary,
   },
   merchantRowDetails: {
     flex: 1,
     marginRight: 8,
   },
   merchantRowName: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 14,
-    color: '#0F172A',
+    ...typography.h4,
+    marginBottom: 2,
   },
   merchantRowSub: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 1,
+    ...typography.caption,
   },
   merchantRowRight: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   merchantRowAmount: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 14,
-    color: '#0F172A',
-    letterSpacing: -0.3,
+    ...typography.numberSecondary,
   },
   sectionHeader: {
     marginTop: spacing.xs,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   sectionTitle: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 15,
-    color: '#0F172A',
-    letterSpacing: -0.2,
+    ...typography.h3,
   },
   categoryCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  cardOverBudget: {
-    borderColor: colors.error,
-  },
-  cardNearBudget: {
-    borderColor: colors.warning,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    ...shadow.card,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -512,49 +446,37 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   categoryName: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 15,
-    color: '#0F172A',
+    ...typography.h4,
   },
   overBudgetLabel: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 11,
+    ...typography.caption,
     color: colors.error,
     marginTop: 1,
   },
   trendLabel: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
+    ...typography.caption,
     marginTop: 1,
   },
   trendLabelMuted: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#94A3B8',
+    ...typography.caption,
+    color: colors.textTertiary,
     marginTop: 1,
   },
-  categoryCurrentTotal: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 16,
-    color: '#0F172A',
-    letterSpacing: -0.3,
+  projectedValueHero: {
+    ...typography.numberPrimary,
   },
-  barTrack: {
-    height: 6,
-    backgroundColor: '#F1F5F9',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: spacing.sm,
-  },
-  barFill: {
-    height: '100%',
-    borderRadius: 3,
+  projectedLabel: {
+    ...typography.caption,
+    marginTop: 2,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 4,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    marginTop: spacing.sm,
   },
   statCol: {
     flex: 1,
@@ -563,31 +485,21 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   statLabel: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#64748B',
+    ...typography.caption,
   },
   statValue: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 13,
-    color: '#334155',
-    marginTop: 2,
-  },
-  projectedValue: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 13,
-    color: '#0F172A',
+    ...typography.numberSecondary,
     marginTop: 2,
   },
   budgetRow: {
     marginTop: spacing.sm,
     paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   budgetTrack: {
     height: 4,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.background,
     borderRadius: 2,
     overflow: 'hidden',
   },
@@ -596,9 +508,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   budgetText: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#64748B',
+    ...typography.caption,
     marginTop: 4,
   },
 });

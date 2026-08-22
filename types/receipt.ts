@@ -6,7 +6,8 @@ export type ExtractionWarning =
   | 'missing_total'
   | 'partial_items'
   | 'clamped_values'
-  | 'total_mismatch';
+  | 'total_mismatch'
+  | 'suspicious_tax';
 
 export interface ParsedReceiptItem {
   name: string;

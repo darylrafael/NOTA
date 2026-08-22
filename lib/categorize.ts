@@ -45,7 +45,7 @@ const CATEGORY_KEYWORDS: Record<Exclude<Category, 'Other'>, string[]> = {
     'shopee', 'tokopedia', 'mall', 'uniqlo', 'zara',
     'shirt', 'shoes', 'fashion', 'electronics', 'celana', 'sandal',
     'dompet', 'jam', 'kacamata', 'aksesoris', 'hp', 'laptop', 'charger',
-    'kabel', 'earphone', 'kosmetik', 'skincare', 'parfum', 'beli', 'paylater'
+    'kabel', 'cable', 'earphone', 'kosmetik', 'skincare', 'parfum', 'beli', 'paylater'
   ],
   Bills: [
     'listrik', 'pln', 'pdam', 'pulsa', 'token', 'tagihan', 'wifi', 'indihome',

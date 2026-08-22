@@ -35,6 +35,7 @@ export function parseAndValidateExtraction(rawText: string): GeminiExtractionRes
 
   const items: ParsedReceiptItem[] = [];
   let skippedItems = false;
+  let extractedNegativeItemsSum = 0;
 
   for (const rawItem of root.items) {
     const item = asRecord(rawItem);
@@ -48,13 +49,18 @@ export function parseAndValidateExtraction(rawText: string): GeminiExtractionRes
     const rawQty = Number(item.quantity);
     const rawUnit = firstNumber(item.unitPrice);
 
-    if (name.length === 0 || rawLineTotal === null || rawLineTotal < 0 || !Number.isFinite(rawLineTotal)) {
+    if (name.length === 0 || rawLineTotal === null || !Number.isFinite(rawLineTotal)) {
       skippedItems = true;
       continue;
     }
 
     let lineTotal = roundRupiah(rawLineTotal);
-    if (lineTotal <= 0) {
+    if (lineTotal < 0) {
+      extractedNegativeItemsSum += Math.abs(lineTotal);
+      skippedItems = true;
+      continue;
+    }
+    if (lineTotal === 0) {
       skippedItems = true;
       continue;
     }
@@ -111,10 +117,37 @@ export function parseAndValidateExtraction(rawText: string): GeminiExtractionRes
   const serviceCharge = sanitizeCharge(firstNumber(root.serviceCharge), () => {
     clamped = true;
   });
-  const discount = sanitizeCharge(firstNumber(root.discount), () => {
+  let discount = sanitizeCharge(firstNumber(root.discount), () => {
     clamped = true;
   });
+  
+  if (extractedNegativeItemsSum > 0) {
+    // If the root discount perfectly matches the sum of negative items, it's double-counted.
+    // Otherwise, we sum them, and let the reconciliation engine flag any mismatch.
+    if (discount === extractedNegativeItemsSum) {
+      // Do nothing, it's already captured in discount
+    } else {
+      discount += extractedNegativeItemsSum;
+    }
+  }
   if (clamped && !warnings.includes('clamped_values')) warnings.push('clamped_values');
+
+  const itemsSubtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+
+  // Multi-signal sanity check for tax extraction:
+  // 1. Likely percentage rate mistakenly parsed as nominal rupiah (e.g. tax = 8 or 10 or 11 when subtotal >= 1000)
+  // 2. Unusually tiny tax ratio (<1% when subtotal is substantial)
+  // 3. Unusually excessive tax ratio (>35% when subtotal is substantial)
+  if (tax > 0 && itemsSubtotal > 0) {
+    const taxRatio = tax / itemsSubtotal;
+    const isLikelyPercentage = tax <= 30 && itemsSubtotal >= 1000;
+    const isUnusuallyTiny = itemsSubtotal >= 10000 && taxRatio < 0.01;
+    const isUnusuallyHuge = itemsSubtotal >= 10000 && taxRatio > 0.35;
+
+    if (isLikelyPercentage || isUnusuallyTiny || isUnusuallyHuge) {
+      warnings.push('suspicious_tax');
+    }
+  }
 
   const calculated = calculatedReceiptTotal({ items, tax, serviceCharge, discount });
   if (reconcileTotals(calculated, receiptTotal).status === 'mismatch') {

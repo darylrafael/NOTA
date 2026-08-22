@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, Alert, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, Alert, StatusBar, ActivityIndicator, Animated, Dimensions, Easing } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -9,10 +9,74 @@ import { Ionicons } from '@expo/vector-icons';
 import { extractDocument, GeminiVisionError, GeminiVisionErrorKind } from '../../lib/geminiVision';
 import { categorizeItem } from '../../lib/categorize';
 import { filterNonExpenseItems } from '../../lib/filterReceiptItems';
-import { colors, spacing, radius } from '../../constants/theme';
+import { colors, spacing, radius, typography } from '../../constants/theme';
 import Button from '../../components/Button';
 import StateView from '../../components/StateView';
 import { EditableReceiptItem } from '../../types/receipt';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+function ProcessingUI({ status, onCancel }: { status: string; onCancel: () => void }) {
+  const insets = require('react-native-safe-area-context').useSafeAreaInsets();
+  
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+  const breathScale = useRef(new Animated.Value(1)).current;
+  const breathOpacity = useRef(new Animated.Value(0.5)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    ]).start(() => {
+      Animated.loop(
+        Animated.parallel([
+          Animated.sequence([
+            Animated.timing(breathScale, { toValue: 1.15, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            Animated.timing(breathScale, { toValue: 1, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true })
+          ]),
+          Animated.sequence([
+            Animated.timing(breathOpacity, { toValue: 1, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            Animated.timing(breathOpacity, { toValue: 0.5, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true })
+          ])
+        ])
+      ).start();
+    });
+  }, [fadeAnim, slideAnim, breathScale, breathOpacity]);
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, { opacity: fadeAnim }]}>
+      <View style={styles.elegantOverlay}>
+        <Animated.View 
+          style={[
+            styles.processingCenter,
+            { transform: [{ translateY: slideAnim }] }
+          ]}
+        >
+          <Animated.View style={{ 
+            opacity: breathOpacity, 
+            transform: [{ scale: breathScale }],
+            marginBottom: 36,
+            backgroundColor: 'rgba(255,255,255,0.08)',
+            padding: 24,
+            borderRadius: 48,
+          }}>
+            <Ionicons name="sparkles" size={36} color="#FFFFFF" />
+          </Animated.View>
+          <Text style={styles.processingTitle}>{status}</Text>
+          <Text style={styles.processingDesc}>Extracting transaction details...</Text>
+        </Animated.View>
+        <TouchableOpacity
+          onPress={onCancel}
+          style={[styles.elegantCancelBtn, { paddingBottom: Math.max(insets.bottom, 24) }]}
+          activeOpacity={0.6}
+        >
+          <Text style={styles.elegantCancelText}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+}
 
 type ScreenMode = 'idle' | 'camera' | 'preview' | 'processing' | 'error';
 
@@ -26,38 +90,44 @@ interface ErrorCopy {
 const ERROR_COPY: Record<GeminiVisionErrorKind, ErrorCopy> = {
   network: {
     icon: 'cloud-offline-outline',
-    title: "Couldn't analyze this document",
-    subtitle: "We couldn't reach the scanner. Check your connection, then try again or enter the items yourself.",
+    title: "Connection failed",
+    subtitle: "We couldn't reach the scanner. Please check your connection and try again.",
     primaryLabel: 'Try Again',
   },
   processing: {
     icon: 'scan-outline',
-    title: "Couldn't read this document",
-    subtitle: 'The photo may be blurry, cropped, or not a supported receipt or payment proof. Retake it, or enter the details manually.',
-    primaryLabel: 'Retake Photo',
+    title: "We couldn't read this receipt",
+    subtitle: 'Some parts of the document were unclear. Please try again or enter the details manually.',
+    primaryLabel: 'Try Again',
   },
 };
 
-const PROCESSING_STEPS = ['Analyzing document…', 'Identifying items…', 'Calculating totals…'];
+const PROCESSING_STEPS = ['Reading your receipt...', 'Extracting merchant...', 'Extracting items...', 'Checking total...'];
 
 export default function ScanScreen() {
   const [mode, setMode] = useState<ScreenMode>('idle');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<GeminiVisionErrorKind>('processing');
-  const [processingStep, setProcessingStep] = useState(0);
+  const [processingStatus, setProcessingStatus] = useState<string>('Preparing image...');
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const router = useRouter();
+  const modeRef = useRef(mode);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   useFocusEffect(
     useCallback(() => {
       return () => {
-        if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
-          abortControllerRef.current = null;
+        if (modeRef.current === 'camera') {
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+          }
+          setMode('idle');
         }
-        setMode((current) => (current === 'camera' || current === 'processing' ? 'idle' : current));
       };
     }, [])
   );
@@ -69,15 +139,10 @@ export default function ScanScreen() {
   }, []);
 
   useEffect(() => {
-    if (mode !== 'processing') {
-      setProcessingStep(0);
-      return;
-    }
-    const id = setInterval(() => {
-      setProcessingStep((prev) => (prev + 1) % PROCESSING_STEPS.length);
-    }, 2200);
-    return () => clearInterval(id);
-  }, [mode]);
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   async function handleOpenCamera() {
     if (!permission?.granted) {
@@ -142,6 +207,7 @@ export default function ScanScreen() {
   async function handleProceed() {
     if (!photoUri) return;
     setMode('processing');
+    setProcessingStatus('Preparing image...');
 
     abortControllerRef.current = new AbortController();
 
@@ -156,6 +222,7 @@ export default function ScanScreen() {
         throw new Error('Image manipulation failed to output base64');
       }
 
+      setProcessingStatus('Analyzing document...');
       const result = await extractDocument(manipulated.base64, abortControllerRef.current.signal);
       abortControllerRef.current = null;
 
@@ -173,6 +240,11 @@ export default function ScanScreen() {
         lineTotal: item.lineTotal,
       }));
 
+      const FileSystem = require('expo-file-system/legacy');
+      const filename = `receipt-${Date.now()}.jpg`;
+      const savedImageUri = `${FileSystem.documentDirectory}${filename}`;
+      await FileSystem.copyAsync({ from: manipulated.uri, to: savedImageUri });
+
       setPhotoUri(null);
       setMode('idle');
 
@@ -189,6 +261,7 @@ export default function ScanScreen() {
           purchaseDate: result.purchaseDate ?? '',
           dateExtracted: result.dateExtracted ? '1' : '0',
           hadParsingIssues: result.hadParsingIssues ? '1' : '0',
+          imageUri: savedImageUri,
         },
       });
     } catch (err) {
@@ -201,6 +274,14 @@ export default function ScanScreen() {
       setErrorKind(kind);
       setMode('error');
     }
+  }
+
+  function handleCancelProcess() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setMode('idle');
   }
 
   function handleErrorPrimaryPress() {
@@ -233,13 +314,14 @@ export default function ScanScreen() {
     return (
       <View style={styles.processingContainer}>
         <StatusBar barStyle="light-content" />
-        {photoUri && <Image source={{ uri: photoUri }} style={styles.processingThumbnail} resizeMode="cover" />}
-        <View style={styles.processingOverlay}>
-          <View style={styles.processingCard}>
-            <Text style={styles.processingText}>{PROCESSING_STEPS[processingStep]}</Text>
-            <Text style={styles.processingHint}>This usually takes a few seconds</Text>
-          </View>
-        </View>
+        {photoUri && (
+          <Image
+            source={{ uri: photoUri }}
+            style={[StyleSheet.absoluteFill, { transform: [{ scale: 1.05 }] }]}
+            resizeMode="cover"
+          />
+        )}
+        <ProcessingUI status={processingStatus} onCancel={handleCancelProcess} />
       </View>
     );
   }
@@ -254,8 +336,10 @@ export default function ScanScreen() {
         subtitle={copy.subtitle}
         primaryLabel={copy.primaryLabel}
         onPrimaryPress={handleErrorPrimaryPress}
-        secondaryLabel="Enter manually"
-        onSecondaryPress={handleEnterManually}
+        secondaryLabel={errorKind === 'network' ? 'Retake Photo' : 'Enter manually'}
+        onSecondaryPress={errorKind === 'network' ? handleRetake : handleEnterManually}
+        tertiaryLabel={errorKind === 'network' ? 'Enter manually' : undefined}
+        onTertiaryPress={errorKind === 'network' ? handleEnterManually : undefined}
       />
     );
   }
@@ -322,19 +406,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   title: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 22,
-    color: '#0F172A',
+    ...typography.h1,
     marginBottom: 6,
     textAlign: 'center',
-    letterSpacing: -0.4,
   },
   subtitle: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 14,
-    color: '#64748B',
+    ...typography.bodySecondary,
     textAlign: 'center',
-    lineHeight: 20,
     marginBottom: spacing.xl,
     paddingHorizontal: spacing.xs,
   },
@@ -353,10 +431,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   manualLinkText: {
-    fontFamily: 'Manrope_600SemiBold',
-    color: '#64748B',
-    fontSize: 13,
-    textAlign: 'center',
+    ...typography.caption,
   },
   captureBar: { position: 'absolute', bottom: 40, width: '100%', alignItems: 'center' },
   captureButton: {
@@ -379,17 +454,47 @@ const styles = StyleSheet.create({
   processingThumbnail: { flex: 1, opacity: 0.35 },
   processingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   processingCard: {
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: radius.lg,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)', // Dark Navy slightly transparent
+    borderRadius: radius.md,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
     alignItems: 'center',
   },
-  processingText: { color: '#fff', fontFamily: 'Manrope_700Bold', fontSize: 15 },
-  processingHint: {
-    color: 'rgba(255,255,255,0.7)',
+  elegantOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)', // Dark, sleek frosted-like background
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  processingCenter: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  processingTitle: {
+    ...typography.h3,
+    color: '#FFFFFF',
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  processingDesc: {
+    ...typography.bodySecondary,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: spacing.lg,
+  },
+  elegantCancelBtn: {
+    width: '100%',
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+  },
+  elegantCancelText: {
+    ...typography.body,
     fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-    marginTop: 6,
+    color: 'rgba(255, 255, 255, 0.7)',
   },
 });
+

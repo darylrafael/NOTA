@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,14 +13,12 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ONBOARDING_KEY } from '../constants/onboarding';
 import { getCategoryMeta } from '../constants/categories';
-import { colors } from '../constants/theme';
+import { colors, radius, spacing, shadow, typography } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
 
-// Warna dark hero dibuat dari primary brand (bukan navy generik yang lepas
-// dari sisa app) - supaya onboarding terasa seperti bagian dari NOTA, bukan
-// splash screen dari app lain.
-const HERO_DARK = '#241E4E';
+// Unify the onboarding pages to use the app's standard dark theme
+const HERO_DARK = colors.primary;
 
 const DOT_THEMES = [
   { active: '#fff', inactive: 'rgba(255,255,255,0.3)' },
@@ -76,8 +74,8 @@ function ReceiptPage() {
 const p1 = StyleSheet.create({
   page: { flex: 1, backgroundColor: HERO_DARK, paddingTop: 88, paddingHorizontal: 32 },
   textBlock: { marginBottom: 30 },
-  title: { fontFamily: 'Manrope_800ExtraBold', fontSize: 30, color: '#fff', marginBottom: 10, letterSpacing: -0.5 },
-  subtitle: { fontSize: 15, color: '#C6C2E6', lineHeight: 22, maxWidth: 260 },
+  title: { ...typography.h1, color: colors.textOnPrimary, marginBottom: 10 },
+  subtitle: { ...typography.body, color: colors.textTertiary, lineHeight: 22, maxWidth: 260 },
   receiptStage: { alignItems: 'center' },
   flashDot: {
     position: 'absolute',
@@ -91,26 +89,22 @@ const p1 = StyleSheet.create({
   },
   receiptCard: {
     width: 236,
-    backgroundColor: '#fff',
-    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    padding: 18,
+    padding: spacing.md,
     transform: [{ rotate: '-5deg' }],
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 10,
+    ...shadow.raised,
   },
-  receiptStore: { fontFamily: 'Manrope_800ExtraBold', fontSize: 15, color: '#111', textAlign: 'center', letterSpacing: 0.5 },
-  receiptMeta: { fontSize: 10, color: '#999', textAlign: 'center', marginTop: 2, marginBottom: 8 },
-  receiptDivider: { height: 1, backgroundColor: '#e5e5ea', marginVertical: 7 },
+  receiptStore: { ...typography.h4, textAlign: 'center' },
+  receiptMeta: { ...typography.caption, textAlign: 'center', marginTop: 2, marginBottom: 8 },
+  receiptDivider: { height: 1, backgroundColor: colors.border, marginVertical: 7 },
   receiptRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 2.5 },
-  receiptItemName: { fontSize: 12.5, color: '#333' },
-  receiptItemPrice: { fontFamily: 'Manrope_600SemiBold', fontSize: 12.5, color: '#333' },
-  receiptTotalLabel: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: '#111' },
-  receiptTotalValue: { fontFamily: 'Manrope_800ExtraBold', fontSize: 14, color: colors.primary },
+  receiptItemName: { ...typography.bodySecondary },
+  receiptItemPrice: { ...typography.bodySecondary },
+  receiptTotalLabel: { ...typography.h4 },
+  receiptTotalValue: { ...typography.numberSecondary, color: colors.primary },
   scallopRow: {
     flexDirection: 'row',
     width: 236,
@@ -165,7 +159,7 @@ function ConfirmPage() {
 }
 
 const p2 = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  page: { flex: 1, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   frameWrap: { marginBottom: 32 },
   frame: {
     width: 250,
@@ -175,14 +169,14 @@ const p2 = StyleSheet.create({
     borderColor: '#111',
     padding: 14,
   },
-  row: { backgroundColor: '#fff', borderRadius: 10, padding: 10, marginBottom: 8 },
+  row: { backgroundColor: colors.surface, borderRadius: radius.sm, padding: 10, marginBottom: 8 },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  name: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#111' },
-  price: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: '#333' },
+  name: { ...typography.bodySecondary, color: colors.textPrimary },
+  price: { ...typography.bodySecondary, color: colors.textPrimary },
   badge: { alignSelf: 'flex-start', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeText: { fontFamily: 'Manrope_700Bold', fontSize: 9 },
-  saveButton: { backgroundColor: colors.primary, borderRadius: 999, paddingVertical: 11, alignItems: 'center', marginTop: 2 },
-  saveText: { fontFamily: 'Manrope_700Bold', color: '#fff', fontSize: 13 },
+  badgeText: { ...typography.label },
+  saveButton: { backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 11, alignItems: 'center', marginTop: 2 },
+  saveText: { ...typography.h4, color: colors.textOnPrimary },
   checkBadge: {
     position: 'absolute',
     top: -14,
@@ -199,10 +193,10 @@ const p2 = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 6,
   },
-  checkMark: { color: '#fff', fontSize: 20, fontWeight: '800' },
+  checkMark: { color: colors.textOnPrimary, fontSize: 20, fontWeight: '800' },
   textBlock: { width: 250 },
-  title: { fontFamily: 'Manrope_800ExtraBold', fontSize: 26, color: '#111', marginBottom: 8, letterSpacing: -0.4 },
-  subtitle: { fontSize: 14, color: '#666', lineHeight: 21 },
+  title: { ...typography.h1 },
+  subtitle: { ...typography.body, color: colors.textSecondary, lineHeight: 21, marginTop: 8 },
 });
 
 // ---------- Page 3: See where it goes ----------
@@ -239,13 +233,13 @@ function ForecastPage() {
 }
 
 const p3 = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.primary, paddingTop: 90, paddingHorizontal: 28 },
+  page: { flex: 1, backgroundColor: HERO_DARK, paddingTop: 90, paddingHorizontal: 28 },
   textBlock: { marginBottom: 28 },
-  title: { fontFamily: 'Manrope_800ExtraBold', fontSize: 28, color: '#fff', marginBottom: 8, letterSpacing: -0.5 },
-  subtitle: { fontSize: 14, color: '#DCD9F5', lineHeight: 21, maxWidth: 270 },
+  title: { ...typography.h1, color: colors.textOnPrimary, marginBottom: 8 },
+  subtitle: { ...typography.body, color: colors.textTertiary, lineHeight: 21, maxWidth: 270 },
   statRow: { marginBottom: 20 },
-  statAmount: { fontFamily: 'Manrope_800ExtraBold', fontSize: 42, color: '#fff', letterSpacing: -1 },
-  statLabel: { fontSize: 13, color: '#DCD9F5', marginTop: 2 },
+  statAmount: { ...typography.numberHero, color: colors.textOnPrimary },
+  statLabel: { ...typography.bodySecondary, color: colors.textTertiary, marginTop: 2 },
   chartCard: {
     backgroundColor: 'rgba(255,255,255,0.14)',
     borderRadius: 18,
@@ -254,15 +248,15 @@ const p3 = StyleSheet.create({
     marginBottom: 130,
   },
   barRow: { marginBottom: 14 },
-  barLabel: { fontFamily: 'Manrope_600SemiBold', color: '#fff', fontSize: 12, marginBottom: 5 },
+  barLabel: { ...typography.bodySecondary, color: colors.textOnPrimary, marginBottom: 5 },
   barTrack: { height: 8, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 4, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 4 },
 });
 
 // ---------- Shared shell: skip, dots, get started, swipe logic ----------
 const PAGES = [ReceiptPage, ConfirmPage, ForecastPage];
-const PAGE_BG = [HERO_DARK, '#fff', colors.primary];
-const SKIP_COLOR = ['#fff', colors.primary, '#fff'];
+const PAGE_BG = [HERO_DARK, colors.surface, HERO_DARK];
+const SKIP_COLOR = [colors.textOnPrimary, colors.textPrimary, colors.textOnPrimary];
 
 export default function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
   const scrollRef = useRef<ScrollView>(null);
@@ -325,17 +319,18 @@ export default function OnboardingOverlay({ onComplete }: { onComplete: () => vo
 const styles = StyleSheet.create({
   overlay: { flex: 1 },
   skipButton: { position: 'absolute', top: 60, right: 20, zIndex: 10 },
-  skipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16 },
+  skipText: { ...typography.h4 },
   dotsRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 24 },
   dot: { width: 8, height: 8, borderRadius: 4, marginHorizontal: 4 },
   dotActive: { width: 20 },
   getStartedButton: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     marginHorizontal: 32,
     marginBottom: 50,
     paddingVertical: 16,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     alignItems: 'center',
+    ...shadow.raised,
   },
-  getStartedText: { fontFamily: 'Manrope_700Bold', color: colors.primary, fontSize: 17 },
+  getStartedText: { ...typography.h4, color: colors.primary },
 });

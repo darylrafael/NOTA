@@ -4,6 +4,7 @@ import { EditableReceiptItem } from '../types/receipt';
 import { roundRupiah } from '../lib/money';
 import { allocateReceiptTotalByCategory } from '../lib/receiptMath';
 import { validateReceiptWrite } from '../lib/receiptWrite';
+import { initDatabase } from './schema';
 
 function resolveLineTotal(lineTotal: number | null | undefined, price: number, quantity: number): number {
   if (typeof lineTotal === 'number' && lineTotal > 0) return roundRupiah(lineTotal);
@@ -18,6 +19,7 @@ export interface ReceiptSummary {
   itemCount: number;
   categories: string[];
   sourceType: string;
+  imageUri: string | null;
 }
 
 export interface ReceiptItemDetail {
@@ -39,6 +41,9 @@ export interface ReceiptDetail {
   discount: number;
   items: ReceiptItemDetail[];
   sourceType: string;
+  imageUri: string | null;
+  isSharedExpense?: boolean;
+  originalReceiptData?: string | null;
 }
 
 export interface ItemSpendRecord {
@@ -57,7 +62,79 @@ export interface CategoryItemDetail {
   merchantName: string | null;
 }
 
-export async function getAllReceipts(db: SQLite.SQLiteDatabase): Promise<ReceiptSummary[]> {
+export interface ReceiptFilter {
+  searchQuery?: string;
+  startDate?: string;
+  endDate?: string;
+  category?: string;
+}
+
+export async function getAllReceipts(
+  db: SQLite.SQLiteDatabase,
+  filters?: ReceiptFilter
+): Promise<ReceiptSummary[]> {
+  await initDatabase(db);
+  
+  let baseQuery = `
+    SELECT
+      r.id as id,
+      r.merchant_name as merchantName,
+      r.purchase_date as purchaseDate,
+      r.total_amount as totalAmount,
+      COUNT(ri.id) as itemCount,
+      GROUP_CONCAT(DISTINCT NULLIF(ri.category, '')) as categoriesRaw,
+      r.source_type as sourceType,
+      r.image_uri as imageUri
+    FROM receipts r
+    LEFT JOIN receipt_items ri ON ri.receipt_id = r.id
+  `;
+
+  const whereClauses: string[] = [];
+  const params: any[] = [];
+
+  if (filters?.searchQuery && filters.searchQuery.trim().length > 0) {
+    const searchParam = `%${filters.searchQuery.trim()}%`;
+    whereClauses.push(`(
+      r.merchant_name LIKE ? OR 
+      EXISTS (
+        SELECT 1 FROM receipt_items search_ri 
+        WHERE search_ri.receipt_id = r.id 
+        AND search_ri.name LIKE ?
+      )
+    )`);
+    params.push(searchParam, searchParam);
+  }
+
+  if (filters?.startDate) {
+    whereClauses.push(`r.purchase_date >= ?`);
+    params.push(filters.startDate);
+  }
+
+  if (filters?.endDate) {
+    whereClauses.push(`r.purchase_date <= ?`);
+    params.push(filters.endDate);
+  }
+
+  if (filters?.category && filters.category !== 'All') {
+    whereClauses.push(`
+      EXISTS (
+        SELECT 1 FROM receipt_items cat_ri 
+        WHERE cat_ri.receipt_id = r.id 
+        AND cat_ri.category = ?
+      )
+    `);
+    params.push(filters.category);
+  }
+
+  if (whereClauses.length > 0) {
+    baseQuery += ` WHERE ` + whereClauses.join(' AND ');
+  }
+
+  baseQuery += `
+    GROUP BY r.id
+    ORDER BY COALESCE(NULLIF(r.created_at, ''), r.updated_at, r.purchase_date) DESC, r.purchase_date DESC
+  `;
+
   const rows = await db.getAllAsync<{
     id: string;
     merchantName: string | null;
@@ -66,20 +143,8 @@ export async function getAllReceipts(db: SQLite.SQLiteDatabase): Promise<Receipt
     itemCount: number;
     categoriesRaw: string | null;
     sourceType: string;
-  }>(`
-    SELECT
-      r.id as id,
-      r.merchant_name as merchantName,
-      r.purchase_date as purchaseDate,
-      r.total_amount as totalAmount,
-      COUNT(ri.id) as itemCount,
-      GROUP_CONCAT(DISTINCT NULLIF(ri.category, '')) as categoriesRaw,
-      r.source_type as sourceType
-    FROM receipts r
-    LEFT JOIN receipt_items ri ON ri.receipt_id = r.id
-    GROUP BY r.id
-    ORDER BY r.updated_at DESC, r.purchase_date DESC
-  `);
+    imageUri: string | null;
+  }>(baseQuery, params);
 
   return rows.map((row) => ({
     id: row.id,
@@ -89,7 +154,13 @@ export async function getAllReceipts(db: SQLite.SQLiteDatabase): Promise<Receipt
     itemCount: row.itemCount,
     categories: row.categoriesRaw ? row.categoriesRaw.split(',') : [],
     sourceType: row.sourceType,
+    imageUri: row.imageUri,
   }));
+}
+
+export async function getTotalReceiptCount(db: SQLite.SQLiteDatabase): Promise<number> {
+  const result = await db.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM receipts`);
+  return result?.count ?? 0;
 }
 
 export async function getReceiptDetail(
@@ -105,8 +176,11 @@ export async function getReceiptDetail(
     service_charge: number | null;
     discount: number | null;
     source_type: string;
+    image_uri: string | null;
+    is_shared_expense: number;
+    original_receipt_data: string | null;
   }>(
-    `SELECT id, merchant_name, purchase_date, total_amount, tax, service_charge, discount, source_type FROM receipts WHERE id = ?`,
+    `SELECT id, merchant_name, purchase_date, total_amount, tax, service_charge, discount, source_type, image_uri, is_shared_expense, original_receipt_data FROM receipts WHERE id = ?`,
     [receiptId]
   );
   if (!receipt) return null;
@@ -139,6 +213,9 @@ export async function getReceiptDetail(
     discount: receipt.discount ?? 0,
     items,
     sourceType: receipt.source_type,
+    imageUri: receipt.image_uri,
+    isSharedExpense: !!receipt.is_shared_expense,
+    originalReceiptData: receipt.original_receipt_data,
   };
 }
 
@@ -208,7 +285,7 @@ export async function getItemsByCategory(
      FROM receipt_items ri
      JOIN receipts r ON ri.receipt_id = r.id
      WHERE ${categoryFilter} AND r.purchase_date >= ? AND r.purchase_date < ?
-     ORDER BY r.purchase_date DESC`,
+     ORDER BY r.created_at DESC, r.purchase_date DESC`,
     params
   );
   return rows.map((row) => ({
@@ -317,7 +394,7 @@ export async function getMerchantReceipts(
      FROM receipts r
      LEFT JOIN receipt_items ri ON ri.receipt_id = r.id
      WHERE ${filter}
-     ORDER BY r.purchase_date DESC`,
+     ORDER BY r.created_at DESC, r.purchase_date DESC`,
     params
   );
 
@@ -360,16 +437,18 @@ export async function saveReceipt(
   tax: number = 0,
   serviceCharge: number = 0,
   sourceType: string = 'receipt',
-  discount: number = 0
+  discount: number = 0,
+  imageUri: string | null = null
 ): Promise<string> {
+  await initDatabase(db);
   const validated = validateReceiptWrite({ purchaseDate, items, tax, serviceCharge, discount });
   const receiptId = randomUUID();
   const createdAt = new Date().toISOString();
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      `INSERT INTO receipts (id, merchant_name, total_amount, purchase_date, created_at, updated_at, tax, service_charge, source_type, discount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO receipts (id, merchant_name, total_amount, purchase_date, created_at, updated_at, tax, service_charge, source_type, discount, image_uri)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         receiptId,
         merchantName,
@@ -381,6 +460,7 @@ export async function saveReceipt(
         validated.serviceCharge,
         sourceType,
         validated.discount,
+        imageUri,
       ]
     );
 
@@ -415,6 +495,7 @@ export async function updateReceipt(
   sourceType: string = 'receipt',
   discount: number = 0
 ): Promise<void> {
+  await initDatabase(db);
   const validated = validateReceiptWrite({ purchaseDate, items, tax, serviceCharge, discount });
   const updatedAt = new Date().toISOString();
 
@@ -454,11 +535,82 @@ export async function updateReceipt(
   });
 }
 
+export async function convertToSharedExpense(
+  db: SQLite.SQLiteDatabase,
+  originalReceipt: ReceiptDetail,
+  personalItems: EditableReceiptItem[],
+  personalTax: number,
+  personalServiceCharge: number,
+  personalDiscount: number
+): Promise<void> {
+  await initDatabase(db);
+  const validated = validateReceiptWrite({ 
+    purchaseDate: originalReceipt.purchaseDate, 
+    items: personalItems, 
+    tax: personalTax, 
+    serviceCharge: personalServiceCharge, 
+    discount: personalDiscount 
+  });
+  
+  const updatedAt = new Date().toISOString();
+  // Idempotency: if it's already a shared expense, keep the FIRST original receipt data.
+  // Otherwise, we stringify the current receipt state to save it as the original.
+  const originalDataJson = originalReceipt.originalReceiptData || JSON.stringify(originalReceipt);
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE receipts
+       SET total_amount = ?, updated_at = ?, tax = ?, service_charge = ?, discount = ?, 
+           is_shared_expense = 1, original_receipt_data = ?
+       WHERE id = ?`,
+      [
+        validated.totalAmount,
+        updatedAt,
+        validated.tax,
+        validated.serviceCharge,
+        validated.discount,
+        originalDataJson,
+        originalReceipt.id,
+      ]
+    );
+    await db.runAsync(`DELETE FROM receipt_items WHERE receipt_id = ?`, [originalReceipt.id]);
+    for (const item of personalItems) {
+      await db.runAsync(
+        `INSERT INTO receipt_items (id, receipt_id, name, price, quantity, category, line_total)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(),
+          originalReceipt.id,
+          item.name.trim(),
+          roundRupiah(item.price),
+          item.quantity,
+          item.category,
+          roundRupiah(item.lineTotal),
+        ]
+      );
+    }
+  });
+}
+
 export async function deleteReceipt(db: SQLite.SQLiteDatabase, receiptId: string): Promise<void> {
+  const receipt = await db.getFirstAsync<{ image_uri: string | null }>(
+    `SELECT image_uri FROM receipts WHERE id = ?`,
+    [receiptId]
+  );
+  
   await db.withTransactionAsync(async () => {
     await db.runAsync(`DELETE FROM receipt_items WHERE receipt_id = ?`, [receiptId]);
     await db.runAsync(`DELETE FROM receipts WHERE id = ?`, [receiptId]);
   });
+
+  if (receipt?.image_uri) {
+    try {
+      const FileSystem = require('expo-file-system/legacy');
+      await FileSystem.deleteAsync(receipt.image_uri, { idempotent: true });
+    } catch (e) {
+      console.warn('Failed to delete associated receipt image:', e);
+    }
+  }
 }
 
 export async function getBudgets(db: SQLite.SQLiteDatabase): Promise<Record<string, number>> {
@@ -487,4 +639,80 @@ export async function setBudgets(
       }
     }
   });
+}
+
+// ----------------------------------------------------------------------------
+// MERCHANT PREFERENCES (PHASE 4)
+// ----------------------------------------------------------------------------
+
+export interface MerchantPreference {
+  merchantName: string;
+  category: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function getMerchantPreference(
+  db: SQLite.SQLiteDatabase,
+  merchantName: string
+): Promise<string | null> {
+  const key = merchantName.trim().toLowerCase();
+  if (!key) return null;
+
+  try {
+    const row = await db.getFirstAsync<{ category: string }>(
+      `SELECT category FROM merchant_preferences WHERE LOWER(merchant_name) = ?`,
+      [key]
+    );
+    return row?.category || null;
+  } catch (err) {
+    console.error('Error getting merchant preference:', err);
+    return null;
+  }
+}
+
+export async function saveMerchantPreference(
+  db: SQLite.SQLiteDatabase,
+  merchantName: string,
+  category: string
+): Promise<void> {
+  const key = merchantName.trim().toLowerCase();
+  if (!key || !category) return;
+
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO merchant_preferences (merchant_name, category, created_at, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(merchant_name) DO UPDATE SET 
+       category = excluded.category,
+       updated_at = excluded.updated_at`,
+    [key, category, now, now]
+  );
+}
+
+export async function getAllMerchantPreferences(
+  db: SQLite.SQLiteDatabase
+): Promise<MerchantPreference[]> {
+  const rows = await db.getAllAsync<{
+    merchant_name: string;
+    category: string;
+    created_at: string;
+    updated_at: string;
+  }>(`SELECT * FROM merchant_preferences ORDER BY merchant_name ASC`);
+  
+  return rows.map(r => ({
+    merchantName: r.merchant_name,
+    category: r.category,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  }));
+}
+
+export async function deleteMerchantPreference(
+  db: SQLite.SQLiteDatabase,
+  merchantName: string
+): Promise<void> {
+  const key = merchantName.trim().toLowerCase();
+  if (!key) return;
+  await db.runAsync(`DELETE FROM merchant_preferences WHERE LOWER(merchant_name) = ?`, [key]);
 }

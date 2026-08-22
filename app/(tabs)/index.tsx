@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,20 +9,28 @@ import {
   ScrollView,
   Alert,
   StatusBar,
+  TextInput,
+  ActionSheetIOS,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { getAllReceipts, getAllItemSpend, deleteReceipt, ReceiptSummary, ItemSpendRecord } from '../../db/queries';
-import { formatRupiah } from '../../lib/format';
+import { getAllReceipts, getAllItemSpend, deleteReceipt, getTotalReceiptCount, ReceiptSummary, ItemSpendRecord } from '../../db/queries';
+import { formatRupiah, normalizeMerchantName } from '../../lib/format';
 import { formatPurchaseDate, currentMonthRange, previousMonthRange, isInRange, parsePurchaseDate } from '../../lib/date';
 import { CATEGORIES, getCategoryMeta } from '../../constants/categories';
 import { DOCUMENT_TYPE_META } from '../../constants/documentTypes';
 import { SourceType } from '../../types/receipt';
-import { colors, spacing, radius } from '../../constants/theme';
+import { colors, spacing, radius, shadow, typography } from '../../constants/theme';
+import { getTopSpendingCategory } from '../../lib/forecast';
 import StateView from '../../components/StateView';
+import AnimatedNumber from '../../components/AnimatedNumber';
+import TransactionCard from '../../components/TransactionCard';
+import BottomSheet from '../../components/BottomSheet';
+import * as Haptics from 'expo-haptics';
 
 type DateFilter = 'thisMonth' | 'lastMonth' | 'allTime';
 
@@ -42,25 +50,90 @@ function formatDate(value: string): string {
   return formatPurchaseDate(value);
 }
 
+function CategoryChip({
+  category,
+  isSelected,
+  meta,
+  onPress,
+}: {
+  category: string;
+  isSelected: boolean;
+  meta: any;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.categoryChip,
+        isSelected && styles.categoryChipActive,
+      ]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      {meta && (
+        <View
+          style={[
+            styles.categoryChipDot,
+            { backgroundColor: isSelected ? colors.textOnPrimary : (meta?.color || colors.surface) },
+          ]}
+        />
+      )}
+      <Text
+        style={[
+          styles.categoryChipText,
+          isSelected && styles.categoryChipTextActive,
+        ]}
+      >
+        {category}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function HomeScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [receipts, setReceipts] = useState<ReceiptSummary[]>([]);
+  const [totalReceipts, setTotalReceipts] = useState<number>(0);
   const [itemSpend, setItemSpend] = useState<ItemSpendRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [dateFilter, setDateFilter] = useState<DateFilter>('thisMonth');
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 250);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   const loadData = useCallback(async (getIsActive: () => boolean = () => true) => {
     try {
       if (getIsActive()) setHasError(false);
-      const [receiptData, spendData] = await Promise.all([getAllReceipts(db), getAllItemSpend(db)]);
+      
+      const range = getDateRange(dateFilter);
+      const filters = {
+        searchQuery: debouncedSearchQuery,
+        startDate: range?.start,
+        endDate: range?.end,
+        category: categoryFilter,
+      };
+
+      const [receiptData, spendData, countData] = await Promise.all([
+        getAllReceipts(db, filters),
+        getAllItemSpend(db),
+        getTotalReceiptCount(db)
+      ]);
+      
       if (getIsActive()) {
         setReceipts(receiptData);
         setItemSpend(spendData);
+        setTotalReceipts(countData);
         setIsLoading(false);
         setIsRefreshing(false);
       }
@@ -72,7 +145,7 @@ export default function HomeScreen() {
         setHasError(true);
       }
     }
-  }, [db]);
+  }, [db, debouncedSearchQuery, dateFilter, categoryFilter]);
 
   useFocusEffect(
     useCallback(() => {
@@ -111,18 +184,17 @@ export default function HomeScreen() {
     );
   }
 
+  function handleDateFilterPress() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setDateSheetVisible(true);
+  }
+
   const range = useMemo(() => getDateRange(dateFilter), [dateFilter]);
 
-  const filteredReceipts = useMemo(() => {
-    return receipts.filter((r) => {
-      const inRange = !range || isInRange(r.purchaseDate, range.start, range.end);
-      const inCategory = categoryFilter === 'All' || r.categories.includes(categoryFilter);
-      return inRange && inCategory;
-    });
-  }, [receipts, range, categoryFilter]);
+  const filteredReceipts = receipts;
 
   const summaryTotal = useMemo(() => {
-    if (categoryFilter === 'All') {
+    if (categoryFilter === 'All' || debouncedSearchQuery.trim().length > 0) {
       return filteredReceipts.reduce((sum, r) => sum + r.totalAmount, 0);
     }
     return itemSpend
@@ -133,7 +205,33 @@ export default function HomeScreen() {
         return !range || (normalized !== null && normalized >= range.start && normalized < range.end);
       })
       .reduce((sum, rec) => sum + rec.amount, 0);
-  }, [categoryFilter, filteredReceipts, itemSpend, range]);
+  }, [categoryFilter, filteredReceipts, itemSpend, range, debouncedSearchQuery]);
+
+  const categoryTotals = useMemo(() => {
+    if (debouncedSearchQuery.trim().length > 0) return [];
+    
+    const totals = new Map<string, number>();
+    let totalItemsSpend = 0;
+    
+    for (const rec of itemSpend) {
+      const normalized = parsePurchaseDate(rec.purchaseDate);
+      if (range && (normalized === null || normalized < range.start || normalized >= range.end)) {
+        continue;
+      }
+      const cat = rec.category || 'Other';
+      totals.set(cat, (totals.get(cat) || 0) + rec.amount);
+      totalItemsSpend += rec.amount;
+    }
+    
+    const sorted = Array.from(totals.entries())
+      .map(([category, amount]) => ({ category, amount, meta: getCategoryMeta(category) }))
+      .sort((a, b) => b.amount - a.amount);
+      
+    return { data: sorted, total: totalItemsSpend };
+  }, [itemSpend, range, debouncedSearchQuery]);
+
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [isDateSheetVisible, setDateSheetVisible] = useState(false);
 
   if (hasError) {
     return (
@@ -151,7 +249,7 @@ export default function HomeScreen() {
     );
   }
 
-  if (!isLoading && receipts.length === 0) {
+  if (!isLoading && totalReceipts === 0) {
     return (
       <View style={styles.flex}>
         <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
@@ -180,159 +278,203 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <View style={{ paddingTop: Math.max(insets.top, 16) }}>
-            {/* Header: Overview Title */}
+            {/* Dynamic Header */}
             <View style={styles.headerSection}>
-              <Text style={styles.headerTitle}>Overview</Text>
-              <Text style={styles.headerSubtitle}>Your spending at a glance</Text>
-            </View>
-
-            {/* Compact Spending Summary Card */}
-            <View style={styles.summaryCardWrapper}>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryLabel}>
-                  {categoryFilter === 'All' ? 'TOTAL SPEND' : `${categoryFilter.toUpperCase()} SPEND`}
-                </Text>
-                <Text style={styles.summaryAmount}>{formatRupiah(summaryTotal)}</Text>
-                <Text style={styles.summarySubtext}>
-                  {filteredReceipts.length} transaction{filteredReceipts.length === 1 ? '' : 's'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Segmented Time-Period Filters */}
-            <View style={styles.periodFilterContainer}>
-              <View style={styles.periodSegmentWrapper}>
-                {DATE_FILTERS.map((f) => {
-                  const isSelected = dateFilter === f.key;
-                  return (
-                    <TouchableOpacity
-                      key={f.key}
-                      style={[styles.periodSegmentBtn, isSelected && styles.periodSegmentBtnActive]}
-                      onPress={() => setDateFilter(f.key)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[styles.periodSegmentText, isSelected && styles.periodSegmentTextActive]}>
-                        {f.label}
-                      </Text>
+              {searchVisible ? (
+                <View style={[styles.searchBox, { flex: 1, marginBottom: 0 }]}>
+                  <Ionicons name="search" size={18} color={colors.textTertiary} style={styles.searchIcon} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search transactions"
+                    placeholderTextColor={colors.textTertiary}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    returnKeyType="search"
+                    autoFocus
+                  />
+                  <TouchableOpacity 
+                    onPress={() => { setSearchQuery(''); setSearchVisible(false); }} 
+                    style={styles.searchClearBtn}
+                    hitSlop={{top:10, bottom:10, left:10, right:10}}
+                  >
+                    <Text style={{ color: colors.accent, fontFamily: 'Manrope_600SemiBold' }}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.headerTitleRow}>
+                  <Text style={styles.headerTitle}>Overview</Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: 16 }}>
+                    <TouchableOpacity onPress={() => setSearchVisible(true)}>
+                      <Ionicons name="search-outline" size={24} color={colors.textPrimary} />
                     </TouchableOpacity>
-                  );
-                })}
-              </View>
+                    <TouchableOpacity onPress={() => router.push('/settings')}>
+                      <Ionicons name="settings-outline" size={24} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
 
-            {/* Horizontal Scrollable Category Chips */}
-            <View style={styles.categoryFilterContainer}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.categoryChipScroll}
-              >
-                {['All', ...CATEGORIES].map((category) => {
-                  const isSelected = categoryFilter === category;
-                  const meta = category !== 'All' ? getCategoryMeta(category) : null;
-                  return (
-                    <TouchableOpacity
-                      key={category}
-                      style={[styles.categoryChip, isSelected && styles.categoryChipActive]}
-                      onPress={() => setCategoryFilter(category)}
-                      activeOpacity={0.7}
-                    >
-                      {meta && (
-                        <View
-                          style={[
-                            styles.categoryChipDot,
-                            { backgroundColor: isSelected ? '#FFFFFF' : meta.color },
-                          ]}
-                        />
-                      )}
-                      <Text style={[styles.categoryChipText, isSelected && styles.categoryChipTextActive]}>
-                        {category}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
+            {/* Modern Spending Card */}
+            {(!searchVisible && debouncedSearchQuery === '' && totalReceipts > 0) ? (
+              <View style={styles.modernCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View>
+                    <Text style={styles.modernCardLabel}>
+                      {categoryFilter === 'All' ? 'TOTAL SPENT' : `${categoryFilter.toUpperCase()} SPEND`}
+                    </Text>
+                    <AnimatedNumber value={summaryTotal} formatter={formatRupiah} style={styles.modernCardAmount} />
+                  </View>
+                  
+                  <TouchableOpacity 
+                    style={styles.timeFilterPill}
+                    onPress={handleDateFilterPress}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.timeFilterPillText}>
+                      {DATE_FILTERS.find(f => f.key === dateFilter)?.label}
+                    </Text>
+                    <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+                
+                {/* Stacked Bar Chart */}
+                {categoryFilter === 'All' && !Array.isArray(categoryTotals) && categoryTotals.total > 0 && categoryTotals.data.length > 0 && (
+                  <View style={styles.chartWrapper}>
+                    <View style={styles.chartTrack}>
+                      {categoryTotals.data.map((item) => {
+                        const pct = (item.amount / categoryTotals.total) * 100;
+                        if (pct < 1) return null;
+                        return (
+                          <View key={item.category} style={[styles.chartSegment, { width: `${pct}%`, backgroundColor: item.meta.color }]} />
+                        );
+                      })}
+                    </View>
+                    <View style={styles.chartLegend}>
+                      {categoryTotals.data.slice(0, 4).map(item => {
+                        const pct = Math.round((item.amount / categoryTotals.total) * 100);
+                        return (
+                          <View key={item.category} style={styles.legendItem}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                              <View style={[styles.legendDot, { backgroundColor: item.meta.color }]} />
+                              <Text style={styles.legendText} numberOfLines={1}>{item.category}</Text>
+                            </View>
+                            <Text style={styles.legendAmount}>
+                              {pct}% · {formatRupiah(item.amount)}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+              </View>
+            ) : (
+              debouncedSearchQuery.length > 0 && (
+                <View style={styles.modernCard}>
+                  <Text style={styles.modernCardLabel}>SEARCH RESULTS</Text>
+                  <AnimatedNumber value={summaryTotal} formatter={formatRupiah} style={styles.modernCardAmount} />
+                </View>
+              )
+            )}
+
+            {/* Horizontal Scrollable Category Chips (Mini) */}
+            {debouncedSearchQuery === '' && totalReceipts > 0 && (
+              <View style={styles.categoryFilterContainerMini}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.categoryChipScrollMini}
+                >
+                  {['All', ...CATEGORIES].map((category) => {
+                    const isSelected = categoryFilter === category;
+                    const meta = category !== 'All' ? getCategoryMeta(category) : null;
+                    return (
+                      <CategoryChip
+                        key={category}
+                        category={category}
+                        isSelected={isSelected}
+                        meta={meta}
+                        onPress={() => {
+                          if (!isSelected) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setCategoryFilter(category);
+                        }}
+                      />
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
 
             {/* Section Header */}
-            <View style={styles.transactionHeaderSection}>
-              <Text style={styles.sectionTitle}>Transactions</Text>
-              <Text style={styles.transactionCountBadge}>{filteredReceipts.length}</Text>
-            </View>
+            {totalReceipts > 0 && (
+              <View style={styles.transactionHeaderSection}>
+                <Text style={styles.sectionTitle}>Transactions</Text>
+                <Text style={styles.transactionCountBadge}>{filteredReceipts.length}</Text>
+              </View>
+            )}
           </View>
         }
-        renderItem={({ item }) => {
+        renderItem={({ item, index }) => {
           const primaryCategory = item.categories[0] || 'Other';
           const primaryMeta = getCategoryMeta(primaryCategory);
-          const merchantDisplay = item.merchantName?.trim() || 'Shopping Receipt';
+          const merchantDisplay = normalizeMerchantName(item.merchantName);
           const dateDisplay = formatDate(item.purchaseDate);
 
           return (
-            <Swipeable
-              renderRightActions={() => (
-                <TouchableOpacity style={styles.swipeDeleteButton} onPress={() => handleDeletePress(item.id)}>
-                  <Ionicons name="trash-outline" size={20} color="#FFFFFF" />
-                  <Text style={styles.swipeDeleteText}>Delete</Text>
-                </TouchableOpacity>
-              )}
-            >
-              <TouchableOpacity
-                style={styles.transactionRow}
-                onPress={() => router.push(`/receipt/${item.id}`)}
-                activeOpacity={0.7}
-              >
-                {/* Standardized Icon Container */}
-                <View style={[styles.iconContainer, { backgroundColor: primaryMeta.color + '15' }]}>
-                  <Ionicons name={primaryMeta.icon as any} size={18} color={primaryMeta.color} />
-                </View>
-
-                {/* Left: Merchant and Date/Badge */}
-                <View style={styles.transactionDetails}>
-                  <Text style={styles.merchantName} numberOfLines={2}>
-                    {merchantDisplay}
-                  </Text>
-                  <View style={styles.metaRow}>
-                    <Text style={styles.dateText}>{dateDisplay}</Text>
-                    <Text style={styles.metaSeparator}>·</Text>
-                    <View style={[styles.categoryBadge, { backgroundColor: primaryMeta.color + '15' }]}>
-                      <Text style={[styles.categoryBadgeText, { color: primaryMeta.color }]}>
-                        {primaryCategory.toUpperCase()}
-                      </Text>
-                    </View>
-                    {item.sourceType && item.sourceType !== 'receipt' && (
-                      <>
-                        <Text style={styles.metaSeparator}>·</Text>
-                        <View style={[styles.categoryBadge, { backgroundColor: '#F1F5F9' }]}>
-                          <Ionicons 
-                            name={DOCUMENT_TYPE_META[item.sourceType as SourceType]?.icon || 'document-text-outline'} 
-                            size={10} 
-                            color="#64748B" 
-                            style={{ marginRight: 2 }} 
-                          />
-                          <Text style={[styles.categoryBadgeText, { color: '#64748B' }]}>
-                            {DOCUMENT_TYPE_META[item.sourceType as SourceType]?.label.toUpperCase() || 'DOCUMENT'}
-                          </Text>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                </View>
-
-                {/* Right: Amount & Chevron */}
-                <View style={styles.transactionRight}>
-                  <Text style={styles.amountText}>{formatRupiah(item.totalAmount)}</Text>
-                  <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} style={styles.chevron} />
-                </View>
-              </TouchableOpacity>
-            </Swipeable>
+            <TransactionCard
+              id={item.id}
+              merchantName={merchantDisplay}
+              dateDisplay={dateDisplay}
+              primaryCategory={primaryCategory}
+              totalAmount={item.totalAmount}
+              onPress={() => router.push(`/receipt/${item.id}`)}
+              onDelete={handleDeletePress}
+            />
           );
         }}
         ListEmptyComponent={
-          <View style={styles.emptyFilteredState}>
-            <Ionicons name="filter-outline" size={32} color={colors.textTertiary} />
-            <Text style={styles.emptyFilteredText}>No transactions found for this filter.</Text>
-          </View>
+          totalReceipts === 0 ? (
+            <View style={styles.absoluteEmptyState}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="receipt-outline" size={48} color={colors.textTertiary} />
+              </View>
+              <Text style={styles.absoluteEmptyTitle}>Nothing here yet</Text>
+              <Text style={styles.absoluteEmptySubtitle}>
+                Scan your first receipt and NOTA will organize it for you.
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyScanButton}
+                onPress={() => router.push('/scan')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="scan-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
+                <Text style={styles.emptyScanButtonText}>Scan Receipt</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.emptyFilteredState}>
+              <Ionicons name="filter-outline" size={32} color={colors.textTertiary} />
+              <Text style={styles.emptyFilteredText}>
+                {searchQuery.trim().length > 0
+                  ? `No transactions found for "${searchQuery.trim()}".`
+                  : "No transactions found for this filter."}
+              </Text>
+            </View>
+          )
         }
+      />
+
+      <BottomSheet
+        visible={isDateSheetVisible}
+        onClose={() => setDateSheetVisible(false)}
+        options={DATE_FILTERS}
+        selectedValue={dateFilter}
+        onSelect={(key) => setDateFilter(key as DateFilter)}
+        title="Select Time Period"
       />
     </View>
   );
@@ -351,101 +493,134 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm,
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  settingsBtn: {
+    padding: spacing.xs,
+  },
   headerTitle: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 26,
-    color: '#0F172A', // Dark Navy
-    letterSpacing: -0.6,
+    ...typography.h2,
   },
-  headerSubtitle: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  summaryCardWrapper: {
-    paddingHorizontal: spacing.md,
+  modernCard: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
     marginBottom: spacing.md,
-  },
-  summaryCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderWidth: 1,
-    borderColor: '#E2E8F0', // Subtle light gray border
+    padding: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    ...shadow.card,
   },
-  summaryLabel: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 11,
-    color: '#64748B', // Muted slate
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  summaryAmount: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 28,
-    color: '#0F172A', // Dark Navy
-    letterSpacing: -1,
-    marginTop: 4,
+  modernCardLabel: {
+    ...typography.label,
+    color: colors.textSecondary,
     marginBottom: 4,
   },
-  summarySubtext: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13,
-    color: '#94A3B8',
-  },
-  periodFilterContainer: {
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  periodSegmentWrapper: {
-    flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    borderRadius: radius.sm,
-    padding: 3,
-  },
-  periodSegmentBtn: {
-    flex: 1,
-    paddingVertical: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 7,
-  },
-  periodSegmentBtnActive: {
-    backgroundColor: '#0F172A', // Dark Navy
-  },
-  periodSegmentText: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13,
-    color: '#64748B',
-  },
-  periodSegmentTextActive: {
-    color: '#FFFFFF',
-    fontFamily: 'Manrope_700Bold',
-  },
-  categoryFilterContainer: {
+  modernCardAmount: {
+    ...typography.numberHero,
     marginBottom: spacing.md,
   },
-  categoryChipScroll: {
+  timeFilterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primaryMuted,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    gap: 4,
+  },
+  timeFilterPillText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontFamily: 'Manrope_600SemiBold',
+  },
+  chartWrapper: {
+    marginTop: spacing.xs,
+  },
+  chartTrack: {
+    flexDirection: 'row',
+    height: 12,
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: colors.primaryMuted,
+    marginBottom: spacing.sm,
+  },
+  chartSegment: {
+    height: '100%',
+  },
+  chartLegend: {
+    marginTop: spacing.sm,
+    gap: 8,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  legendText: {
+    ...typography.bodySecondary,
+    color: colors.textPrimary,
+  },
+  legendAmount: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontFamily: 'Manrope_600SemiBold',
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9', // same as periodSegmentWrapper
+    borderRadius: radius.md,
+    height: 40,
+    paddingHorizontal: 12,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    ...typography.body,
+    fontSize: 15,
+    height: 40,
+    paddingVertical: 0, // fixes vertical alignment on android
+  },
+  searchClearBtn: {
+    padding: 4,
+    marginLeft: 4,
+  },
+  categoryFilterContainerMini: {
+    marginBottom: spacing.md,
+  },
+  categoryChipScrollMini: {
     paddingHorizontal: spacing.md,
     paddingRight: spacing.lg,
     gap: 8,
   },
+
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     borderRadius: radius.pill,
     paddingHorizontal: 12,
     paddingVertical: 6,
     height: 32,
   },
   categoryChipActive: {
-    backgroundColor: '#0F172A',
-    borderColor: '#0F172A',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   categoryChipDot: {
     width: 6,
@@ -454,12 +629,10 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   categoryChipText: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-    color: '#64748B',
+    ...typography.bodySecondary,
   },
   categoryChipTextActive: {
-    color: '#FFFFFF',
+    color: colors.textOnPrimary,
     fontFamily: 'Manrope_700Bold',
   },
   transactionHeaderSection: {
@@ -470,97 +643,12 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   sectionTitle: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 15,
-    color: '#0F172A',
-    letterSpacing: -0.2,
+    ...typography.h3,
   },
   transactionCountBadge: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-    color: '#94A3B8',
+    ...typography.caption,
   },
-  transactionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 14,
-    paddingHorizontal: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  transactionDetails: {
-    flex: 1,
-    marginRight: 8,
-  },
-  merchantName: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 15,
-    color: '#0F172A',
-    lineHeight: 20,
-    marginBottom: 4,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dateText: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-    color: '#64748B',
-  },
-  metaSeparator: {
-    marginHorizontal: 6,
-    color: '#CBD5E1',
-    fontSize: 12,
-  },
-  categoryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-  },
-  categoryBadgeText: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 10,
-    letterSpacing: 0.4,
-  },
-  transactionRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  amountText: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 15,
-    color: '#0F172A',
-    letterSpacing: -0.3,
-    textAlign: 'right',
-  },
-  chevron: {
-    marginLeft: 6,
-  },
-  swipeDeleteButton: {
-    backgroundColor: colors.error,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 75,
-  },
-  swipeDeleteText: {
-    fontFamily: 'Manrope_700Bold',
-    color: '#FFFFFF',
-    fontSize: 11,
-    marginTop: 2,
-  },
+
   emptyFilteredState: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -571,5 +659,47 @@ const styles = StyleSheet.create({
     fontFamily: 'Manrope_600SemiBold',
     fontSize: 13,
     color: '#94A3B8',
+  },
+  absoluteEmptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 100,
+    paddingHorizontal: spacing.xl,
+  },
+  emptyIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  absoluteEmptyTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginBottom: 8,
+  },
+  absoluteEmptySubtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.xl,
+    lineHeight: 22,
+  },
+  emptyScanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+  },
+  emptyScanButtonText: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 15,
+    color: colors.textOnPrimary,
   },
 });
