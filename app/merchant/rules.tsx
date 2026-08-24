@@ -50,7 +50,7 @@ export default function MerchantRulesScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: 'Merchant Rules', headerBackTitle: 'Settings' }} />
+
       
       <FlatList
         data={rules}

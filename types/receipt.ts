@@ -40,3 +40,19 @@ export interface EditableReceiptItem {
   category: string;
   lineTotal: number;
 }
+
+export type ReviewReason =
+  | 'missing_merchant'
+  | 'missing_category'
+  | 'math_mismatch'
+  | 'potential_duplicate';
+
+export interface ReviewQueueItem {
+  id: string;
+  merchantName: string | null;
+  totalAmount: number;
+  purchaseDate: string;
+  isSharedExpense: boolean;
+  imageUri: string | null;
+  reasons: ReviewReason[];
+}

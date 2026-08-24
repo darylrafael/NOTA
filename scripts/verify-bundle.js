@@ -1,19 +1,21 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
 
 console.log('--- NOTA V2 SECURITY VERIFICATION ---');
 console.log('Generating Expo export bundle for inspection...');
 
+let outDir = null;
+
 try {
-  const outDir = 'dist-verify';
+  outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nota-bundle-verify-'));
   
   // Force android platform to avoid react-native-web dependency errors
-  execSync(`npx expo export --platform android --output-dir ${outDir}`, { stdio: 'inherit' });
+  execSync(`npx expo export --platform android --output-dir "${outDir}"`, { stdio: 'inherit' });
   
   console.log('\nScanning generated bundle for leaked API keys...');
   
-  const distDir = path.join(__dirname, '..', 'dist-verify');
   const filesToScan = [];
   
   function scanDir(dir) {
@@ -29,7 +31,7 @@ try {
     }
   }
   
-  scanDir(distDir);
+  scanDir(outDir);
   
   let leakFound = false;
   
@@ -59,11 +61,20 @@ try {
   
   if (leakFound) {
     console.error('\n❌ Security audit failed! API key was detected by static inspection in the client bundle.');
-    process.exit(1);
+    process.exitCode = 1;
   } else {
     console.log('\n✅ Security audit passed. The automated static bundle inspection did NOT find the Gemini API key in the client bundle.');
   }
 } catch (error) {
   console.error('\nError during verification:', error.message);
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  if (outDir && fs.existsSync(outDir)) {
+    try {
+      fs.rmSync(outDir, { recursive: true, force: true });
+      console.log(`Cleaned up temporary directory: ${outDir}`);
+    } catch (e) {
+      console.error(`Failed to clean up temporary directory ${outDir}:`, e.message);
+    }
+  }
 }

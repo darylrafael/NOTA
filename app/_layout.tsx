@@ -107,12 +107,20 @@ export default function RootLayout() {
             options={{ headerShown: true, title: 'Store Details' }}
           />
           <Stack.Screen
+            name="merchant/rules"
+            options={{ headerShown: true, title: 'Merchant Rules', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
             name="budget"
             options={{ headerShown: true, title: 'Monthly Budgets', presentation: 'modal' }}
           />
           <Stack.Screen
             name="split/[id]"
             options={{ headerShown: false, presentation: 'modal' }}
+          />
+          <Stack.Screen
+            name="review-queue"
+            options={{ headerShown: true, title: 'Review Queue', headerBackTitle: 'Back' }}
           />
         </Stack>
       </SQLiteProvider>

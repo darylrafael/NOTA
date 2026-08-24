@@ -1,10 +1,10 @@
 import { useCallback, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar, Image, Modal, ScrollView } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, StatusBar, Image, Modal, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useFocusEffect, useRouter, Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Ionicons } from '@expo/vector-icons';
-import { getReceiptDetail, ReceiptDetail } from '../../db/queries';
+import { getReceiptDetail, ReceiptDetail, deleteReceipt } from '../../db/queries';
 import { formatRupiah, toTitleCase } from '../../lib/format';
 import { formatPurchaseDateLong, formatPurchaseDateShort } from '../../lib/date';
 import { getCategoryMeta } from '../../constants/categories';
@@ -12,7 +12,6 @@ import { DOCUMENT_TYPE_META } from '../../constants/documentTypes';
 import { SourceType } from '../../types/receipt';
 import { colors, spacing, radius } from '../../constants/theme';
 import StateView from '../../components/StateView';
-
 export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
@@ -22,7 +21,6 @@ export default function ReceiptDetailScreen() {
   const [hasError, setHasError] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [isViewerVisible, setIsViewerVisible] = useState(false);
-
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -49,7 +47,29 @@ export default function ReceiptDetailScreen() {
       };
     }, [db, id, retryToken])
   );
-
+  const handleDelete = () => {
+    Alert.alert(
+      'Delete Receipt',
+      'Are you sure you want to delete this receipt? This action will permanently remove the transaction and its stored image.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!id) return;
+            try {
+              await deleteReceipt(db, id);
+              router.back();
+            } catch (e) {
+              console.error('Failed to delete receipt:', e);
+              Alert.alert('Error', 'Failed to delete the receipt. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
   if (hasError) {
     return (
       <View style={styles.flex}>
@@ -69,7 +89,6 @@ export default function ReceiptDetailScreen() {
       </View>
     );
   }
-
   if (isLoading) {
     return (
       <View style={styles.centered}>
@@ -77,7 +96,6 @@ export default function ReceiptDetailScreen() {
       </View>
     );
   }
-
   if (!receipt) {
     return (
       <View style={styles.centered}>
@@ -85,9 +103,7 @@ export default function ReceiptDetailScreen() {
       </View>
     );
   }
-
   const merchantDisplay = receipt.merchantName?.trim() || 'Shopping Receipt';
-  
   const primaryCategory = Object.entries(
     receipt.items.reduce((acc, item) => {
       const cat = item.category || 'Other';
@@ -95,9 +111,7 @@ export default function ReceiptDetailScreen() {
       return acc;
     }, {} as Record<string, number>)
   ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Other';
-  
   const primaryMeta = getCategoryMeta(primaryCategory);
-
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
@@ -107,7 +121,7 @@ export default function ReceiptDetailScreen() {
           headerBackTitle: 'Back',
           headerShadowVisible: false,
           headerStyle: { backgroundColor: '#FAFAFA' },
-          headerRight: () => (
+          headerRight: () => receipt.isSharedExpense ? null : (
             <TouchableOpacity
               onPress={() => router.push({ pathname: '/confirm', params: { receiptId: receipt.id } })}
               style={styles.editBtn}
@@ -129,7 +143,6 @@ export default function ReceiptDetailScreen() {
             <View style={styles.heroSection}>
               <Text style={styles.heroMerchant} numberOfLines={2}>{merchantDisplay}</Text>
               <Text style={styles.heroAmount}>{formatRupiah(receipt.totalAmount)}</Text>
-              
               <View style={styles.heroMetaRow}>
                 <View style={[styles.heroCategoryBadge, { backgroundColor: primaryMeta.color + '15' }]}>
                   <Ionicons name={primaryMeta.icon as any} size={14} color={primaryMeta.color} />
@@ -138,16 +151,15 @@ export default function ReceiptDetailScreen() {
                   </Text>
                 </View>
                 <Text style={styles.heroDate}>{formatPurchaseDateLong(receipt.purchaseDate)}</Text>
-                
                 {!!receipt.sourceType && receipt.sourceType !== 'receipt' && (
                   <>
                     <Text style={{ color: '#94A3B8', fontSize: 12 }}>·</Text>
                     <View style={styles.heroSourceBadge}>
-                      <Ionicons 
-                        name={DOCUMENT_TYPE_META[receipt.sourceType as SourceType]?.icon || 'document-text-outline'} 
-                        size={10} 
-                        color="#64748B" 
-                        style={{ marginRight: 2 }} 
+                      <Ionicons
+                        name={DOCUMENT_TYPE_META[receipt.sourceType as SourceType]?.icon || 'document-text-outline'}
+                        size={10}
+                        color="#64748B"
+                        style={{ marginRight: 2 }}
                       />
                       <Text style={styles.heroSourceBadgeText}>
                         {DOCUMENT_TYPE_META[receipt.sourceType as SourceType]?.label.toUpperCase() || 'DOCUMENT'}
@@ -156,7 +168,6 @@ export default function ReceiptDetailScreen() {
                   </>
                 )}
               </View>
-
               {receipt.isSharedExpense && receipt.originalReceiptData ? (
                 <View style={styles.sharedExpenseBanner}>
                   <Ionicons name="pie-chart" size={16} color={colors.primary} />
@@ -178,7 +189,6 @@ export default function ReceiptDetailScreen() {
                 </TouchableOpacity>
               )}
             </View>
-
             <Text style={styles.sectionTitle}>Transaction Details</Text>
           </View>
         }
@@ -186,7 +196,6 @@ export default function ReceiptDetailScreen() {
           const catMeta = getCategoryMeta(item.category || 'Other');
           const isFirst = index === 0;
           const isLast = index === receipt.items.length - 1;
-
           return (
             <View
               style={[
@@ -252,21 +261,20 @@ export default function ReceiptDetailScreen() {
                 <Text style={styles.totalValue}>{formatRupiah(receipt.totalAmount)}</Text>
               </View>
             </View>
-
             {receipt.imageUri && (
               <View style={styles.imageCard}>
                 <Text style={styles.sectionLabel}>ORIGINAL RECEIPT</Text>
-                <TouchableOpacity 
-                  style={styles.imageWrapper} 
+                <TouchableOpacity
+                  style={styles.imageWrapper}
                   onPress={() => setIsViewerVisible(true)}
                   activeOpacity={0.8}
                   accessibilityRole="imagebutton"
                   accessibilityLabel="View full receipt image"
                 >
-                  <Image 
-                    source={{ uri: receipt.imageUri }} 
-                    style={styles.receiptImage} 
-                    resizeMode="cover" 
+                  <Image
+                    source={{ uri: receipt.imageUri }}
+                    style={styles.receiptImage}
+                    resizeMode="cover"
                   />
                   <View style={styles.expandOverlay}>
                     <Ionicons name="expand-outline" size={24} color="#FFF" />
@@ -274,15 +282,22 @@ export default function ReceiptDetailScreen() {
                 </TouchableOpacity>
               </View>
             )}
+            <TouchableOpacity
+              style={styles.deleteActionBtn}
+              onPress={handleDelete}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.error} />
+              <Text style={styles.deleteActionText}>Delete Receipt</Text>
+            </TouchableOpacity>
           </View>
         }
       />
-
       <Modal visible={isViewerVisible} transparent={false} animationType="fade" onRequestClose={() => setIsViewerVisible(false)}>
         <SafeAreaView style={styles.viewerContainer}>
           <StatusBar barStyle="light-content" />
           <View style={styles.viewerHeader}>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => setIsViewerVisible(false)}
               style={styles.viewerCloseBtn}
               accessibilityRole="button"
@@ -300,10 +315,10 @@ export default function ReceiptDetailScreen() {
             showsHorizontalScrollIndicator={false}
             showsVerticalScrollIndicator={false}
           >
-            <Image 
-              source={{ uri: receipt?.imageUri || '' }} 
-              style={styles.viewerImage} 
-              resizeMode="contain" 
+            <Image
+              source={{ uri: receipt?.imageUri || '' }}
+              style={styles.viewerImage}
+              resizeMode="contain"
             />
           </ScrollView>
         </SafeAreaView>
@@ -311,7 +326,6 @@ export default function ReceiptDetailScreen() {
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
@@ -614,4 +628,21 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  deleteActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEF2F2',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.xl,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    gap: 8,
+  },
+  deleteActionText: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 15,
+    color: colors.error,
+  }
 });

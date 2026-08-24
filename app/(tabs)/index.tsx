@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { getAllReceipts, getAllItemSpend, deleteReceipt, getTotalReceiptCount, ReceiptSummary, ItemSpendRecord } from '../../db/queries';
+import { getAllReceipts, getAllItemSpend, deleteReceipt, getTotalReceiptCount, getReceiptsNeedingReview, ReceiptSummary, ItemSpendRecord } from '../../db/queries';
 import { formatRupiah, normalizeMerchantName } from '../../lib/format';
 import { formatPurchaseDate, currentMonthRange, previousMonthRange, isInRange, parsePurchaseDate } from '../../lib/date';
 import { CATEGORIES, getCategoryMeta } from '../../constants/categories';
@@ -97,6 +97,7 @@ export default function HomeScreen() {
   const [receipts, setReceipts] = useState<ReceiptSummary[]>([]);
   const [totalReceipts, setTotalReceipts] = useState<number>(0);
   const [itemSpend, setItemSpend] = useState<ItemSpendRecord[]>([]);
+  const [reviewQueueCount, setReviewQueueCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -124,16 +125,18 @@ export default function HomeScreen() {
         category: categoryFilter,
       };
 
-      const [receiptData, spendData, countData] = await Promise.all([
+      const [receiptData, spendData, countData, reviewData] = await Promise.all([
         getAllReceipts(db, filters),
         getAllItemSpend(db),
-        getTotalReceiptCount(db)
+        getTotalReceiptCount(db),
+        getReceiptsNeedingReview(db)
       ]);
       
       if (getIsActive()) {
         setReceipts(receiptData);
         setItemSpend(spendData);
         setTotalReceipts(countData);
+        setReviewQueueCount(reviewData.length);
         setIsLoading(false);
         setIsRefreshing(false);
       }
@@ -317,6 +320,27 @@ export default function HomeScreen() {
                 </View>
               )}
             </View>
+
+            {/* Review Queue Card */}
+            {reviewQueueCount > 0 && !searchVisible && debouncedSearchQuery === '' && (
+              <TouchableOpacity
+                style={styles.reviewQueueCard}
+                activeOpacity={0.8}
+                onPress={() => router.push('/review-queue')}
+              >
+                <View style={styles.reviewQueueHeader}>
+                  <Ionicons name="warning" size={20} color={colors.warning} />
+                  <Text style={styles.reviewQueueTitle}>Needs Attention</Text>
+                </View>
+                <Text style={styles.reviewQueueSubtitle}>
+                  {reviewQueueCount} {reviewQueueCount === 1 ? 'receipt needs' : 'receipts need'} review
+                </Text>
+                <View style={styles.reviewQueueFooter}>
+                  <Text style={styles.reviewQueueAction}>Review your recent transactions</Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                </View>
+              </TouchableOpacity>
+            )}
 
             {/* Modern Spending Card */}
             {(!searchVisible && debouncedSearchQuery === '' && totalReceipts > 0) ? (
@@ -701,5 +725,42 @@ const styles = StyleSheet.create({
     fontFamily: 'Manrope_700Bold',
     fontSize: 15,
     color: colors.textOnPrimary,
+  },
+  reviewQueueCard: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+    backgroundColor: '#FFFAED', // Very subtle warm warning background
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: '#FFE299', // Gentle orange/yellow border
+  },
+  reviewQueueHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 6,
+  },
+  reviewQueueTitle: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 16,
+    color: colors.warning,
+  },
+  reviewQueueSubtitle: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 14,
+    color: colors.textPrimary,
+    marginBottom: 8,
+  },
+  reviewQueueFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reviewQueueAction: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 13,
+    color: colors.textSecondary,
   },
 });

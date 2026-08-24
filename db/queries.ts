@@ -1,8 +1,9 @@
 import * as SQLite from 'expo-sqlite';
 import { randomUUID } from 'expo-crypto';
-import { EditableReceiptItem } from '../types/receipt';
+import { EditableReceiptItem, ReviewQueueItem, ReviewReason } from '../types/receipt';
 import { roundRupiah } from '../lib/money';
-import { allocateReceiptTotalByCategory } from '../lib/receiptMath';
+import { allocateReceiptTotalByCategory, TOTAL_MATCH_TOLERANCE } from '../lib/receiptMath';
+import { evaluateReviewReasons } from '../lib/reviewQueue';
 import { validateReceiptWrite } from '../lib/receiptWrite';
 import { initDatabase } from './schema';
 
@@ -74,7 +75,7 @@ export async function getAllReceipts(
   filters?: ReceiptFilter
 ): Promise<ReceiptSummary[]> {
   await initDatabase(db);
-  
+
   let baseQuery = `
     SELECT
       r.id as id,
@@ -95,10 +96,10 @@ export async function getAllReceipts(
   if (filters?.searchQuery && filters.searchQuery.trim().length > 0) {
     const searchParam = `%${filters.searchQuery.trim()}%`;
     whereClauses.push(`(
-      r.merchant_name LIKE ? OR 
+      r.merchant_name LIKE ? OR
       EXISTS (
-        SELECT 1 FROM receipt_items search_ri 
-        WHERE search_ri.receipt_id = r.id 
+        SELECT 1 FROM receipt_items search_ri
+        WHERE search_ri.receipt_id = r.id
         AND search_ri.name LIKE ?
       )
     )`);
@@ -118,8 +119,8 @@ export async function getAllReceipts(
   if (filters?.category && filters.category !== 'All') {
     whereClauses.push(`
       EXISTS (
-        SELECT 1 FROM receipt_items cat_ri 
-        WHERE cat_ri.receipt_id = r.id 
+        SELECT 1 FROM receipt_items cat_ri
+        WHERE cat_ri.receipt_id = r.id
         AND cat_ri.category = ?
       )
     `);
@@ -253,7 +254,7 @@ export async function getAllItemSpend(db: SQLite.SQLiteDatabase): Promise<ItemSp
     receipts.set(row.receiptId, receipt);
   }
 
-  return Array.from(receipts.values()).flatMap((receipt) =>
+  return Array.from(receipts.entries()).flatMap(([receiptId, receipt]) =>
     allocateReceiptTotalByCategory(receipt.items, receipt.totalAmount).map((allocation) => ({
       category: allocation.category,
       purchaseDate: receipt.purchaseDate,
@@ -335,7 +336,7 @@ export async function getTopMerchantsThisMonth(
     visitCount: number;
     lastPurchaseDate: string;
   }>(
-    `SELECT 
+    `SELECT
        COALESCE(NULLIF(TRIM(merchant_name), ''), 'Unknown Store') as merchantName,
        SUM(total_amount) as totalAmount,
        COUNT(id) as visitCount,
@@ -379,11 +380,11 @@ export async function getMerchantReceipts(
     item_category: string | null;
     item_line_total: number | null;
   }>(
-    `SELECT 
-       r.id as receipt_id, 
-       r.purchase_date, 
-       r.total_amount, 
-       r.tax, 
+    `SELECT
+       r.id as receipt_id,
+       r.purchase_date,
+       r.total_amount,
+       r.tax,
        r.service_charge,
        ri.id as item_id,
        ri.name as item_name,
@@ -544,14 +545,14 @@ export async function convertToSharedExpense(
   personalDiscount: number
 ): Promise<void> {
   await initDatabase(db);
-  const validated = validateReceiptWrite({ 
-    purchaseDate: originalReceipt.purchaseDate, 
-    items: personalItems, 
-    tax: personalTax, 
-    serviceCharge: personalServiceCharge, 
-    discount: personalDiscount 
+  const validated = validateReceiptWrite({
+    purchaseDate: originalReceipt.purchaseDate,
+    items: personalItems,
+    tax: personalTax,
+    serviceCharge: personalServiceCharge,
+    discount: personalDiscount
   });
-  
+
   const updatedAt = new Date().toISOString();
   // Idempotency: if it's already a shared expense, keep the FIRST original receipt data.
   // Otherwise, we stringify the current receipt state to save it as the original.
@@ -560,7 +561,7 @@ export async function convertToSharedExpense(
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `UPDATE receipts
-       SET total_amount = ?, updated_at = ?, tax = ?, service_charge = ?, discount = ?, 
+       SET total_amount = ?, updated_at = ?, tax = ?, service_charge = ?, discount = ?,
            is_shared_expense = 1, original_receipt_data = ?
        WHERE id = ?`,
       [
@@ -597,7 +598,7 @@ export async function deleteReceipt(db: SQLite.SQLiteDatabase, receiptId: string
     `SELECT image_uri FROM receipts WHERE id = ?`,
     [receiptId]
   );
-  
+
   await db.withTransactionAsync(async () => {
     await db.runAsync(`DELETE FROM receipt_items WHERE receipt_id = ?`, [receiptId]);
     await db.runAsync(`DELETE FROM receipts WHERE id = ?`, [receiptId]);
@@ -683,7 +684,7 @@ export async function saveMerchantPreference(
   await db.runAsync(
     `INSERT INTO merchant_preferences (merchant_name, category, created_at, updated_at)
      VALUES (?, ?, ?, ?)
-     ON CONFLICT(merchant_name) DO UPDATE SET 
+     ON CONFLICT(merchant_name) DO UPDATE SET
        category = excluded.category,
        updated_at = excluded.updated_at`,
     [key, category, now, now]
@@ -699,7 +700,7 @@ export async function getAllMerchantPreferences(
     created_at: string;
     updated_at: string;
   }>(`SELECT * FROM merchant_preferences ORDER BY merchant_name ASC`);
-  
+
   return rows.map(r => ({
     merchantName: r.merchant_name,
     category: r.category,
@@ -715,4 +716,75 @@ export async function deleteMerchantPreference(
   const key = merchantName.trim().toLowerCase();
   if (!key) return;
   await db.runAsync(`DELETE FROM merchant_preferences WHERE LOWER(merchant_name) = ?`, [key]);
+}
+
+export async function getReceiptsNeedingReview(db: SQLite.SQLiteDatabase): Promise<ReviewQueueItem[]> {
+  await initDatabase(db);
+  const rows = await db.getAllAsync<{
+    id: string;
+    merchant_name: string | null;
+    total_amount: number;
+    purchase_date: string;
+    image_uri: string | null;
+    items_sum: number;
+    tax: number;
+    service_charge: number;
+    discount: number;
+    unassigned_items_count: number;
+    duplicate_count: number;
+    is_shared_expense: number;
+  }>(`
+    WITH receipt_stats AS (
+      SELECT receipt_id,
+             SUM(line_total) as items_sum,
+             SUM(CASE WHEN trim(category) = '' THEN 1 ELSE 0 END) as unassigned_items_count
+      FROM receipt_items
+      GROUP BY receipt_id
+    ),
+    duplicate_groups AS (
+      SELECT trim(lower(merchant_name)) as norm_merchant, total_amount, purchase_date, COUNT(*) as count
+      FROM receipts
+      WHERE merchant_name IS NOT NULL AND trim(merchant_name) != ''
+      GROUP BY trim(lower(merchant_name)), total_amount, purchase_date
+      HAVING COUNT(*) > 1
+    )
+    SELECT r.id, r.merchant_name, r.total_amount, r.purchase_date, r.image_uri, r.tax, r.service_charge, r.discount, r.is_shared_expense,
+      COALESCE(rs.items_sum, 0) as items_sum,
+      COALESCE(rs.unassigned_items_count, 0) as unassigned_items_count,
+      COALESCE(dg.count, 0) as duplicate_count
+    FROM receipts r
+    LEFT JOIN receipt_stats rs ON r.id = rs.receipt_id
+    LEFT JOIN duplicate_groups dg
+      ON trim(lower(r.merchant_name)) = dg.norm_merchant
+      AND r.total_amount = dg.total_amount
+      AND r.purchase_date = dg.purchase_date
+    WHERE
+      (trim(r.merchant_name) = '' OR r.merchant_name IS NULL)
+      OR COALESCE(rs.unassigned_items_count, 0) > 0
+      OR COALESCE(dg.count, 0) > 1
+      OR ABS(COALESCE(rs.items_sum, 0) + r.tax + r.service_charge - r.discount - r.total_amount) > ${TOTAL_MATCH_TOLERANCE}
+    ORDER BY r.purchase_date DESC, r.created_at DESC
+  `);
+
+  const results: ReviewQueueItem[] = [];
+
+  for (const row of rows) {
+    const reasons = evaluateReviewReasons(row);
+
+    // Safety check: a receipt might have rounded perfectly but still caught by the SQL FLOAT quirk,
+    // so we re-evaluate and only push if it's genuinely > TOTAL_MATCH_TOLERANCE difference, OR has other reasons.
+    if (reasons.length > 0) {
+      results.push({
+        id: row.id,
+        merchantName: row.merchant_name,
+        totalAmount: row.total_amount,
+        purchaseDate: row.purchase_date,
+        imageUri: row.image_uri,
+        isSharedExpense: row.is_shared_expense === 1,
+        reasons,
+      });
+    }
+  }
+
+  return results;
 }
