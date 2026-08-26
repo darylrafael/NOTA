@@ -313,6 +313,9 @@ export default function HomeScreen() {
                     <TouchableOpacity onPress={() => setSearchVisible(true)}>
                       <Ionicons name="search-outline" size={24} color={colors.textPrimary} />
                     </TouchableOpacity>
+                    <TouchableOpacity onPress={() => router.push('/price-book')}>
+                      <Ionicons name="pricetags-outline" size={24} color={colors.textPrimary} />
+                    </TouchableOpacity>
                     <TouchableOpacity onPress={() => router.push('/settings')}>
                       <Ionicons name="settings-outline" size={24} color={colors.textPrimary} />
                     </TouchableOpacity>

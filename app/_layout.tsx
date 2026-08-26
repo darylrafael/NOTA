@@ -122,6 +122,14 @@ export default function RootLayout() {
             name="review-queue"
             options={{ headerShown: true, title: 'Review Queue', headerBackTitle: 'Back' }}
           />
+          <Stack.Screen
+            name="price-book/index"
+            options={{ headerShown: true, title: 'Price Book', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="price-book/[name]"
+            options={{ headerShown: true, title: 'Price History', headerBackTitle: 'Back' }}
+          />
         </Stack>
       </SQLiteProvider>
 

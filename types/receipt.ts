@@ -41,6 +41,27 @@ export interface EditableReceiptItem {
   lineTotal: number;
 }
 
+export interface PriceBookItem {
+  itemName: string;
+  normalizedName: string;
+  category: string;
+  purchaseCount: number;
+  minPrice: number;
+  maxPrice: number;
+  avgPrice: number;
+  lastPrice: number;
+  lastPurchaseDate: string;
+}
+
+export interface PriceBookTransaction {
+  receiptId: string;
+  purchaseDate: string;
+  merchantName: string | null;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+}
+
 export type ReviewReason =
   | 'missing_merchant'
   | 'missing_category'

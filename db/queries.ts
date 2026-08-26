@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { randomUUID } from 'expo-crypto';
-import { EditableReceiptItem, ReviewQueueItem, ReviewReason } from '../types/receipt';
+import { EditableReceiptItem, ReviewQueueItem, ReviewReason, PriceBookItem, PriceBookTransaction } from '../types/receipt';
 import { roundRupiah } from '../lib/money';
 import { allocateReceiptTotalByCategory, TOTAL_MATCH_TOLERANCE } from '../lib/receiptMath';
 import { evaluateReviewReasons } from '../lib/reviewQueue';
@@ -787,4 +787,73 @@ export async function getReceiptsNeedingReview(db: SQLite.SQLiteDatabase): Promi
   }
 
   return results;
+}
+export async function getPriceBookItems(db: SQLite.SQLiteDatabase, searchQuery: string = ''): Promise<PriceBookItem[]> {
+  let query = `
+    WITH ItemStats AS (
+      SELECT
+        lower(trim(ri.name)) as normalizedName,
+        MAX(ri.name) as itemName,
+        MAX(ri.category) as category,
+        COUNT(r.id) as purchaseCount,
+        MIN(ri.line_total * 1.0 / ri.quantity) as minPrice,
+        MAX(ri.line_total * 1.0 / ri.quantity) as maxPrice,
+        SUM(ri.line_total) * 1.0 / SUM(ri.quantity) as avgPrice,
+        MAX(r.purchase_date) as lastPurchaseDate
+      FROM receipt_items ri
+      JOIN receipts r ON ri.receipt_id = r.id
+      WHERE ri.line_total > 0 AND ri.quantity > 0 AND r.is_shared_expense = 0
+      GROUP BY lower(trim(ri.name))
+    ),
+    LatestPrices AS (
+      SELECT
+        lower(trim(ri.name)) as normalizedName,
+        (ri.line_total * 1.0 / ri.quantity) as lastPrice,
+        ROW_NUMBER() OVER (PARTITION BY lower(trim(ri.name)) ORDER BY r.purchase_date DESC, r.created_at DESC) as rn
+      FROM receipt_items ri
+      JOIN receipts r ON ri.receipt_id = r.id
+      WHERE ri.line_total > 0 AND ri.quantity > 0 AND r.is_shared_expense = 0
+    )
+    SELECT
+      s.itemName,
+      s.normalizedName,
+      s.category,
+      s.purchaseCount,
+      ROUND(s.minPrice) as minPrice,
+      ROUND(s.maxPrice) as maxPrice,
+      ROUND(s.avgPrice) as avgPrice,
+      s.lastPurchaseDate,
+      ROUND(l.lastPrice) as lastPrice
+    FROM ItemStats s
+    JOIN LatestPrices l ON s.normalizedName = l.normalizedName AND l.rn = 1
+  `;
+  const params: any[] = [];
+
+  if (searchQuery.trim().length > 0) {
+    query += ' WHERE s.normalizedName LIKE ? OR lower(s.category) LIKE ?';
+    const term = `%${searchQuery.trim().toLowerCase()}%`;
+    params.push(term, term);
+  }
+
+  query += ' ORDER BY s.purchaseCount DESC, s.lastPurchaseDate DESC;';
+
+  const rows = await db.getAllAsync<PriceBookItem>(query, params);
+  return rows;
+}
+
+export async function getPriceBookItemHistory(db: SQLite.SQLiteDatabase, normalizedName: string): Promise<PriceBookTransaction[]> {
+  const query = `
+    SELECT
+      r.id as receiptId,
+      r.purchase_date as purchaseDate,
+      r.merchant_name as merchantName,
+      ROUND(ri.line_total * 1.0 / ri.quantity) as unitPrice,
+      ri.quantity,
+      ri.line_total as lineTotal
+    FROM receipt_items ri
+    JOIN receipts r ON ri.receipt_id = r.id
+    WHERE lower(trim(ri.name)) = lower(trim(?)) AND ri.line_total > 0 AND ri.quantity > 0 AND r.is_shared_expense = 0
+    ORDER BY r.purchase_date DESC, r.created_at DESC;
+  `;
+  return await db.getAllAsync<PriceBookTransaction>(query, [normalizedName]);
 }
