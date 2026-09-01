@@ -1,4 +1,5 @@
 import { getDateParts } from './date';
+import { UpcomingBill } from '../types/receipt';
 
 export interface ItemSpendRecord {
   category: string;
@@ -42,7 +43,8 @@ function sumByCategoryForMonth(
 
 export function calculateForecast(
   records: ItemSpendRecord[],
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  upcomingBills: UpcomingBill[] = []
 ): CategoryForecast[] {
   const year = referenceDate.getFullYear();
   const month = referenceDate.getMonth();
@@ -65,20 +67,37 @@ export function calculateForecast(
   const prevMonthDate = new Date(year, month - 1, 1);
   const previousTotals = sumByCategoryForMonth(records, prevMonthDate.getFullYear(), prevMonthDate.getMonth());
 
+  const categoriesToProcess = new Set<string>(byCategory.keys());
+  for (const bill of upcomingBills) {
+    if (bill.rule && bill.rule.category) {
+      categoriesToProcess.add(bill.rule.category);
+    }
+  }
+
   const results: CategoryForecast[] = [];
 
-  for (const [category, dailyMap] of byCategory.entries()) {
+  for (const category of categoriesToProcess) {
+    const dailyMap = byCategory.get(category) ?? new Map<number, number>();
+    
     let totalThisMonth = 0;
     for (const amount of dailyMap.values()) totalThisMonth += amount;
+
+    let unpaidRecurring = 0;
+    for (const bill of upcomingBills) {
+      if (!bill.isPaid && bill.rule.category === category) {
+        unpaidRecurring += bill.rule.amount;
+      }
+    }
 
     let windowSum = 0;
     for (let day = daysElapsed - windowSize + 1; day <= daysElapsed; day++) {
       windowSum += dailyMap.get(day) ?? 0;
     }
-    const movingDailyAverage = windowSum / windowSize;
+    const movingDailyAverage = windowSize > 0 ? windowSum / windowSize : 0;
 
     const weeklyAverage = movingDailyAverage * 7;
-    const projectedEndOfMonth = totalThisMonth + movingDailyAverage * daysRemaining;
+    // Base projection + layered unpaid recurring bills
+    const projectedEndOfMonth = totalThisMonth + (movingDailyAverage * daysRemaining) + unpaidRecurring;
 
     const previousMonthTotal = previousTotals.get(category) ?? null;
     const isNewCategory = previousMonthTotal === null || previousMonthTotal === 0;
@@ -121,7 +140,7 @@ export function getTopSpendingCategory(
   const forecasts =
     Array.isArray(forecastsOrRecords) && forecastsOrRecords.length > 0 && 'totalThisMonth' in forecastsOrRecords[0]
       ? (forecastsOrRecords as CategoryForecast[])
-      : calculateForecast(forecastsOrRecords as ItemSpendRecord[], referenceDate);
+      : calculateForecast(forecastsOrRecords as ItemSpendRecord[], referenceDate, []);
 
   const active = forecasts.filter((f) => f.totalThisMonth > 0);
   if (active.length === 0) return null;

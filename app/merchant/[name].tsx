@@ -1,344 +1,164 @@
-import { useCallback, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, StatusBar, TouchableOpacity } from 'react-native';
-import { useLocalSearchParams, useFocusEffect, Stack, useRouter } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  StatusBar
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { getMerchantReceipts, MerchantReceiptDetail } from '../../db/queries';
-import { formatRupiah, toTitleCase } from '../../lib/format';
-import { formatPurchaseDate } from '../../lib/date';
-import { getCategoryMeta } from '../../constants/categories';
-import { colors, spacing, radius } from '../../constants/theme';
-import StateView from '../../components/StateView';
+import { useSQLiteContext } from 'expo-sqlite';
+import { getMerchantSummary, getMerchantTransactions, ReceiptSummary, getMonthlyItemSpend } from '../../db/queries';
+import { colors, typography, spacing, shadow } from '../../constants/theme';
+import { formatRupiah, normalizeMerchantName } from '../../lib/format';
+import TransactionCard from '../../components/TransactionCard';
 
 export default function MerchantDetailScreen() {
-  const { name } = useLocalSearchParams<{ name: string }>();
-  const db = useSQLiteContext();
   const router = useRouter();
-  const [receipts, setReceipts] = useState<MerchantReceiptDetail[]>([]);
+  const insets = useSafeAreaInsets();
+  const db = useSQLiteContext();
+  const { name, start } = useLocalSearchParams<{ name: string; start: string }>();
+
   const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
-  const [retryToken, setRetryToken] = useState(0);
+  const [summary, setSummary] = useState({ totalAmount: 0, visitCount: 0 });
+  const [transactions, setTransactions] = useState<ReceiptSummary[]>([]);
+  const [monthTotal, setMonthTotal] = useState(0);
 
-  const merchantName = name ? decodeURIComponent(name) : 'Store Details';
+  const loadData = useCallback(async () => {
+    if (!name || !start) return;
+    setIsLoading(true);
+    try {
+      const startDate = new Date(start);
+      const end = new Date(startDate);
+      end.setMonth(end.getMonth() + 1);
+      end.setDate(0);
 
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-      async function load() {
-        if (!name) return;
-        try {
-          setHasError(false);
-          const data = await getMerchantReceipts(db, merchantName);
-          if (isActive) {
-            setReceipts(data);
-            setIsLoading(false);
-          }
-        } catch (err) {
-          console.error('[MerchantDetailScreen] load error:', err);
-          if (isActive) {
-            setIsLoading(false);
-            setHasError(true);
-          }
-        }
-      }
-      load();
-      return () => {
-        isActive = false;
-      };
-    }, [db, name, merchantName, retryToken])
-  );
+      const startStr = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-01T00:00:00.000Z`;
+      const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}T23:59:59.999Z`;
 
-  const totalSpent = receipts.reduce((sum, r) => sum + r.totalAmount, 0);
-  const totalItemsCount = receipts.reduce((sum, r) => sum + r.items.length, 0);
+      const merchantSum = await getMerchantSummary(db, name, startStr, endStr);
+      setSummary(merchantSum);
 
-  if (hasError) {
-    return (
-      <View style={styles.flex}>
-        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
-        <StateView
-          icon="alert-circle-outline"
-          iconTone="error"
-          title="Could not load data"
-          subtitle="Something went wrong. Please try again."
-          primaryLabel="Try Again"
-          onPrimaryPress={() => {
-            setIsLoading(true);
-            setHasError(false);
-            setRetryToken((n) => n + 1);
-          }}
-        />
-      </View>
-    );
-  }
+      const txs = await getMerchantTransactions(db, name, startStr, endStr);
+      // Filter exactly to this merchant to be safe
+      const filtered = txs.filter(t => normalizeMerchantName(t.merchantName).toLowerCase() === normalizeMerchantName(name).toLowerCase());
+      setTransactions(filtered);
 
-  if (isLoading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator color="#0F172A" />
-      </View>
-    );
-  }
+      const spends = await getMonthlyItemSpend(db, startStr, endStr);
+      setMonthTotal(spends.reduce((sum, s) => sum + s.amount, 0));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [db, name, start]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const avg = summary.visitCount > 0 ? summary.totalAmount / summary.visitCount : 0;
+  const pct = monthTotal > 0 ? Math.round((summary.totalAmount / monthTotal) * 100) : 0;
+  const merchantLabel = name ? normalizeMerchantName(name) : 'Merchant';
 
   return (
     <View style={styles.flex}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
-      <Stack.Screen 
-        options={{ 
-          title: merchantName,
-          headerBackTitle: 'Back',
-          headerTitleStyle: {
-            fontFamily: 'Manrope_700Bold',
-            fontSize: 16,
-            color: '#0F172A',
-          },
-        }} 
-      />
+      <StatusBar barStyle="dark-content" />
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{top:10, bottom:10, left:10, right:10}}>
+          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+          <Text style={styles.backText}>Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} numberOfLines={1}>{merchantLabel}</Text>
+        <View style={{ width: 60 }} />
+      </View>
 
-      <FlatList
-        contentContainerStyle={styles.listContent}
-        data={receipts}
-        keyExtractor={(item) => item.id}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <View style={styles.headerSection}>
-            {/* Merchant Summary Hero */}
-            <View style={styles.heroCard}>
-              <View style={styles.storeIconWrapper}>
-                <Ionicons name="storefront" size={24} color="#0F172A" />
+      {isLoading ? (
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 40 }} />
+      ) : (
+        <FlatList
+          data={transactions}
+          keyExtractor={item => item.id}
+          contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingBottom: insets.bottom + 40 }}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <View style={styles.heroSection}>
+              <Text style={styles.heroValue}>{formatRupiah(summary.totalAmount)}</Text>
+              <Text style={styles.heroSub}>{summary.visitCount} transaction{summary.visitCount !== 1 ? 's' : ''}</Text>
+              
+              <View style={styles.statsRow}>
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>Average</Text>
+                  <Text style={styles.statVal}>{formatRupiah(avg)}</Text>
+                </View>
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>% of month</Text>
+                  <Text style={styles.statVal}>{pct}%</Text>
+                </View>
               </View>
-              <Text style={styles.heroMerchantName}>{merchantName}</Text>
-              <Text style={styles.heroTotalAmount}>{formatRupiah(totalSpent)}</Text>
-              <Text style={styles.heroSubtext}>
-                {receipts.length} visit{receipts.length === 1 ? '' : 's'} · {totalItemsCount} items purchased
-              </Text>
+
+              <Text style={styles.sectionTitle}>Transactions</Text>
             </View>
-
-            <Text style={styles.sectionTitle}>Transaction History</Text>
-          </View>
-        }
-        renderItem={({ item }) => {
-          const dateStr = formatPurchaseDate(item.purchaseDate);
-
-          return (
-            <TouchableOpacity 
-              style={styles.receiptCard}
+          }
+          renderItem={({ item }) => (
+            <TransactionCard
+              id={item.id}
+              merchantName={normalizeMerchantName(item.merchantName)}
+              dateDisplay={new Date(item.purchaseDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()}
+              primaryCategory={item.categories[0] || 'Other'}
+              totalAmount={item.totalAmount}
               onPress={() => router.push(`/receipt/${item.id}`)}
-              activeOpacity={0.7}
-            >
-              {/* Receipt Header: Date & Total */}
-              <View style={styles.receiptHeader}>
-                <View style={styles.dateGroup}>
-                  <Ionicons name="calendar-outline" size={14} color="#64748B" />
-                  <Text style={styles.receiptDate}>{dateStr}</Text>
-                </View>
-                <Text style={styles.receiptTotal}>{formatRupiah(item.totalAmount)}</Text>
-              </View>
-
-              {/* Items Purchased on this visit */}
-              <View style={styles.itemsListContainer}>
-                {item.items.map((it, idx) => {
-                  const catMeta = getCategoryMeta(it.category || 'Other');
-                  const isLastItem = idx === item.items.length - 1;
-                  return (
-                    <View 
-                      key={it.id} 
-                      style={[styles.itemRow, !isLastItem && styles.itemRowDivider]}
-                    >
-                      <View style={styles.itemLeft}>
-                        <Text style={styles.itemName} numberOfLines={1}>
-                          {toTitleCase(it.name)}
-                        </Text>
-                        <View style={styles.itemMetaRow}>
-                          <View style={[styles.catBadge, { backgroundColor: catMeta.color + '15' }]}>
-                            <Text style={[styles.catBadgeText, { color: catMeta.color }]}>
-                              {(it.category || 'Other').toUpperCase()}
-                            </Text>
-                          </View>
-                          {it.quantity > 1 && (
-                            <Text style={styles.qtyText}>
-                              {it.quantity} × {formatRupiah(it.price)}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                      <Text style={styles.itemPrice}>{formatRupiah(it.lineTotal)}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-
-              {/* Tax & Service Charge indicator if present */}
-              {(item.tax > 0 || item.serviceCharge > 0) && (
-                <View style={styles.taxServiceRow}>
-                  <Text style={styles.taxServiceText}>
-                    Incl. {item.tax > 0 ? `Tax (${formatRupiah(item.tax)})` : ''}
-                    {item.tax > 0 && item.serviceCharge > 0 ? ' + ' : ''}
-                    {item.serviceCharge > 0 ? `Service (${formatRupiah(item.serviceCharge)})` : ''}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No transaction records found for this merchant.</Text>
-          </View>
-        }
-      />
+            />
+          )}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#FAFAFA' },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAFAFA' },
-  emptyContainer: { padding: 40, alignItems: 'center' },
-  emptyText: { fontFamily: 'Manrope_600SemiBold', color: '#64748B', fontSize: 14 },
-  listContent: { 
-    paddingHorizontal: spacing.md, 
-    paddingTop: spacing.xs,
-    paddingBottom: 40 
-  },
-  headerSection: {
-    marginBottom: spacing.sm,
-  },
-  heroCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: radius.md,
-    paddingVertical: spacing.lg,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    paddingBottom: spacing.sm,
+    backgroundColor: '#FAFAFA',
+  },
+  backBtn: { flexDirection: 'row', alignItems: 'center', width: 80 },
+  backText: { fontFamily: 'Manrope_600SemiBold', fontSize: 16, color: colors.textPrimary, marginLeft: -4 },
+  headerTitle: { flex: 1, fontFamily: 'Manrope_700Bold', fontSize: 16, textAlign: 'center', color: colors.textPrimary },
+  
+  heroSection: {
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.lg,
     alignItems: 'center',
-    marginBottom: spacing.md,
   },
-  storeIconWrapper: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: '#F1F5F9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  heroMerchantName: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 18,
-    color: '#0F172A',
-    textAlign: 'center',
-    letterSpacing: -0.3,
-  },
-  heroTotalAmount: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 28,
-    color: '#0F172A',
-    letterSpacing: -0.8,
-    marginTop: 4,
-    marginBottom: 2,
-  },
-  heroSubtext: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 13,
-    color: '#94A3B8',
-  },
-  sectionTitle: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 14,
-    color: '#0F172A',
-    marginBottom: spacing.xs + 2,
-    letterSpacing: -0.2,
-  },
-  receiptCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm + 4,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  receiptHeader: {
+  heroValue: { ...typography.numberHero, fontSize: 32, marginBottom: 4 },
+  heroSub: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.textSecondary },
+  
+  statsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    width: '100%',
+    gap: 12,
+    marginTop: spacing.xl,
+    marginBottom: spacing.xl,
   },
-  dateGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  receiptDate: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 13,
-    color: '#0F172A',
-  },
-  receiptTotal: {
-    fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 15,
-    color: '#0F172A',
-    letterSpacing: -0.3,
-  },
-  itemsListContainer: {
-    paddingTop: 6,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  itemRowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8FAFC',
-  },
-  itemLeft: {
+  statBox: {
     flex: 1,
-    marginRight: 10,
+    backgroundColor: '#FFF',
+    padding: spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  itemName: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 14,
-    color: '#0F172A',
-  },
-  itemMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 3,
-  },
-  catBadge: {
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  catBadgeText: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 9,
-    letterSpacing: 0.4,
-  },
-  qtyText: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#64748B',
-  },
-  itemPrice: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 14,
-    color: '#0F172A',
-    textAlign: 'right',
-  },
-  taxServiceRow: {
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#F8FAFC',
-    marginTop: 2,
-  },
-  taxServiceText: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    color: '#94A3B8',
-  },
+  statLabel: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.textTertiary, marginBottom: 4 },
+  statVal: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.textPrimary },
+
+  sectionTitle: { ...typography.h3, alignSelf: 'flex-start', marginBottom: spacing.md }
 });

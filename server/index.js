@@ -31,7 +31,7 @@ Read this Indonesian spending document and return only JSON matching the provide
 
 First set sourceType to exactly one of: receipt, bank_transfer, ewallet, qris. If unsure, use receipt.
 
-For a physical receipt or digital invoice (e-commerce, food delivery), identify the merchant and every purchased good/service. Treat shipping fees, delivery fees, ongkos kirim, biaya layanan, and biaya jasa aplikasi as purchased items. Each item needs its original name, whole-number quantity (default 1), unitPrice when visible, and lineTotal. Do not include subtotal, tax, service, discount, or change as items. For per-unit rates (for example fuel), set quantity to 1 and use the stated total as lineTotal.
+For a physical receipt or digital invoice (e-commerce, food delivery), identify the merchant and every purchased good/service. Identify every purchased good/service. Each item needs its original name, whole-number quantity (default 1), unitPrice when visible, and lineTotal. Treat shipping fees (ongkir) as purchased items. Do NOT include subtotal, tax, service, discount, change, rounding (pembulatan), or credit card surcharge as items. Group "biaya layanan", "service charge", "pembulatan", "credit card charge", and "admin fee" into the 'serviceCharge' field. Put PB1, PPN, or Pajak into the 'tax' field. Put discounts into the 'discount' field. For per-unit rates (for example fuel), set quantity to 1 and use the stated total as lineTotal.
 
 For a bank transfer, e-wallet, or QRIS proof, return exactly one item: use the transfer note as its name, or "Transfer" if no note exists. Its quantity is 1 and its lineTotal/unitPrice is the transferred amount.
 
@@ -168,6 +168,95 @@ app.post('/api/extract', async (req, res) => {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error(JSON.stringify({ level: 'error', reqId, event: 'unhandled_error', message }));
     return res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
+const TEXT_EXTRACTION_PROMPT = `
+Read this natural language expense entry and return only JSON matching the provided schema.
+
+First set sourceType: if the text explicitly mentions "gopay", "ovo", "dana", "shopeepay", "e-wallet", or "ewallet", use "ewallet". If it mentions "transfer", "bca", "mandiri", "bni", "bri", or bank names, use "bank_transfer". If it mentions "qris", use "qris". Otherwise, default to "receipt".
+
+Identify the merchantName ONLY if explicitly stated (e.g., "di starbucks", "at mcd"). Do NOT guess the merchant from the item name. If the merchant is ambiguous or not stated (e.g., "makan sate 25rb"), set merchantName to "". Also identify purchaseDate (if mentioned like "kemarin", "hari ini", or a specific date, otherwise leave ""), and every purchased item.
+
+CRITICAL PARSING RULES FOR INDONESIAN CASUAL TEXT:
+- Handle suffixes: "k", "rb", "ribu" mean multiplied by 1000. (e.g., "25k" = 25000, "50rb" = 50000).
+- Handle shorthand multipliers: "2 coffees @15k" means quantity: 2, unitPrice: 15000, lineTotal: 30000.
+- If multiple items are in one sentence (e.g. "nasi padang 20k + es teh 5k"), separate them into multiple objects in the items array.
+- For each item, name should be descriptive. lineTotal is required. quantity defaults to 1 unless specified.
+- If no explicit tax/discount/service charge is mentioned, set them to 0. Treat admin fees, surcharge, credit card fees, and rounding (pembulatan) as serviceCharge.
+
+CRITICAL MATH VALIDATION:
+Before returning the JSON, you MUST mentally verify this exact mathematical equation:
+(Sum of all item lineTotals) + tax + serviceCharge - discount == receiptTotal
+
+If the user does not specify a grand total, calculate receiptTotal as the exact sum of the items plus any charges minus discounts. All monetary values must be exact numbers without currency symbols.
+`.trim();
+
+app.post('/api/extract-text', async (req, res) => {
+  const reqId = Math.random().toString(36).substring(2, 9);
+  const startTime = Date.now();
+  const { text } = req.body;
+  const deviceId = req.headers['x-device-id'];
+
+  console.log(JSON.stringify({
+    level: 'info',
+    reqId,
+    event: 'extract_text_request',
+    deviceId: typeof deviceId === 'string' ? deviceLogId(deviceId) : 'unknown',
+    ip: req.ip,
+    payloadSize: typeof text === 'string' ? text.length : 0,
+  }));
+
+  if (typeof deviceId !== 'string' || deviceId.length === 0 || deviceId.length > 128) {
+    return res.status(401).json({ error: 'Missing device identifier' });
+  }
+  if (typeof text !== 'string' || text.trim().length === 0 || text.length > 2000) {
+    return res.status(400).json({ error: 'Text must be a valid non-empty string under 2000 characters' });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error(JSON.stringify({ level: 'error', reqId, event: 'missing_api_key' }));
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+  if (!checkDeviceQuota(deviceId)) {
+    console.warn(JSON.stringify({ level: 'warn', reqId, event: 'quota_exceeded', deviceId: deviceLogId(deviceId) }));
+    return res.status(429).json({ error: 'Daily scan limit reached for this device.' });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  try {
+    console.log(`[INFO] Attempting text extraction with model: ${GEMINI_MODEL}`);
+    const response = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `User expense text: "${text}"\n\n${TEXT_EXTRACTION_PROMPT}` }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: RESPONSE_SCHEMA },
+      }),
+    });
+
+    if (!response.ok) {
+      const details = (await response.text()).slice(0, 200);
+      console.error(JSON.stringify({ level: 'error', reqId, event: 'upstream_error', status: response.status, details }));
+      return res.status(response.status).json({ error: `Gemini API Error (${response.status})` });
+    }
+
+    const data = await response.json();
+    console.log(JSON.stringify({ level: 'info', reqId, event: 'extract_success', durationMs: Date.now() - startTime }));
+    res.json(data);
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      console.error(JSON.stringify({ level: 'error', reqId, event: 'upstream_timeout' }));
+      return res.status(504).json({ error: 'Upstream API timeout' });
+    }
+    console.error(JSON.stringify({ level: 'error', reqId, event: 'network_error', message: err.message }));
+    res.status(502).json({ error: 'Failed to connect to Gemini API' });
   } finally {
     clearTimeout(timeout);
   }

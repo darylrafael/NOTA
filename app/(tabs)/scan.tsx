@@ -1,12 +1,12 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet, Alert, StatusBar, ActivityIndicator, Animated, Dimensions, Easing } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, Alert, StatusBar, ActivityIndicator, Animated, Dimensions, Easing, TextInput, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { randomUUID } from 'expo-crypto';
 import { Ionicons } from '@expo/vector-icons';
-import { extractDocument, GeminiVisionError, GeminiVisionErrorKind } from '../../lib/geminiVision';
+import { extractDocument, extractText, GeminiVisionError, GeminiVisionErrorKind } from '../../lib/geminiVision';
 import { categorizeItem } from '../../lib/categorize';
 import { filterNonExpenseItems } from '../../lib/filterReceiptItems';
 import { colors, spacing, radius, typography } from '../../constants/theme';
@@ -78,7 +78,7 @@ function ProcessingUI({ status, onCancel }: { status: string; onCancel: () => vo
   );
 }
 
-type ScreenMode = 'idle' | 'camera' | 'preview' | 'processing' | 'error';
+type ScreenMode = 'idle' | 'camera' | 'preview' | 'processing' | 'error' | 'text';
 
 interface ErrorCopy {
   icon: keyof typeof Ionicons.glyphMap;
@@ -110,10 +110,13 @@ export default function ScanScreen() {
   const [errorKind, setErrorKind] = useState<GeminiVisionErrorKind>('processing');
   const [processingStatus, setProcessingStatus] = useState<string>('Preparing image...');
   const [permission, requestPermission] = useCameraPermissions();
+  const [nlpText, setNlpText] = useState('');
+  
   const cameraRef = useRef<CameraView>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const router = useRouter();
   const modeRef = useRef(mode);
+  
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
@@ -121,22 +124,17 @@ export default function ScanScreen() {
   useFocusEffect(
     useCallback(() => {
       return () => {
-        if (modeRef.current === 'camera') {
+        if (modeRef.current === 'camera' || modeRef.current === 'text') {
           if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
           }
           setMode('idle');
+          setNlpText('');
         }
       };
     }, [])
   );
-
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-    };
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -204,6 +202,46 @@ export default function ScanScreen() {
     router.push('/confirm');
   }
 
+  async function handleProcessSuccess(result: any, savedImageUri: string | null = null) {
+    const cleanedItems = filterNonExpenseItems(result.items);
+    if (cleanedItems.length === 0) {
+      throw new GeminiVisionError('No valid items could be read. Please try again.', 'processing');
+    }
+
+    const editableItems: EditableReceiptItem[] = cleanedItems.map((item: any) => ({
+      localId: randomUUID(),
+      name: item.name,
+      price: item.unitPrice,
+      quantity: item.quantity,
+      category: categorizeItem(item.name),
+      lineTotal: item.lineTotal,
+    }));
+
+    setPhotoUri(null);
+    setNlpText('');
+    setMode('idle');
+
+    const params: any = {
+      items: JSON.stringify(editableItems),
+      merchantName: result.merchantName,
+      receiptTotal: result.receiptTotal === null ? '' : String(result.receiptTotal),
+      tax: String(result.tax ?? 0),
+      serviceCharge: String(result.serviceCharge ?? 0),
+      discount: String(result.discount ?? 0),
+      sourceType: result.sourceType,
+      purchaseDate: result.purchaseDate ?? '',
+      dateExtracted: result.dateExtracted ? '1' : '0',
+      hadParsingIssues: result.hadParsingIssues ? '1' : '0',
+      fromText: savedImageUri ? '0' : '1',
+    };
+
+    if (savedImageUri) {
+      params.imageUri = savedImageUri;
+    }
+
+    router.push({ pathname: '/confirm', params });
+  }
+
   async function handleProceed() {
     if (!photoUri) return;
     setMode('processing');
@@ -226,48 +264,40 @@ export default function ScanScreen() {
       const result = await extractDocument(manipulated.base64, abortControllerRef.current.signal);
       abortControllerRef.current = null;
 
-      const cleanedItems = filterNonExpenseItems(result.items);
-      if (cleanedItems.length === 0) {
-        throw new GeminiVisionError('No valid items could be read from this document.', 'processing');
-      }
-
-      const editableItems: EditableReceiptItem[] = cleanedItems.map((item) => ({
-        localId: randomUUID(),
-        name: item.name,
-        price: item.unitPrice,
-        quantity: item.quantity,
-        category: categorizeItem(item.name),
-        lineTotal: item.lineTotal,
-      }));
-
       const FileSystem = require('expo-file-system/legacy');
       const filename = `receipt-${Date.now()}.jpg`;
       const savedImageUri = `${FileSystem.documentDirectory}${filename}`;
       await FileSystem.copyAsync({ from: manipulated.uri, to: savedImageUri });
 
-      setPhotoUri(null);
-      setMode('idle');
-
-      router.push({
-        pathname: '/confirm',
-        params: {
-          items: JSON.stringify(editableItems),
-          merchantName: result.merchantName,
-          receiptTotal: result.receiptTotal === null ? '' : String(result.receiptTotal),
-          tax: String(result.tax ?? 0),
-          serviceCharge: String(result.serviceCharge ?? 0),
-          discount: String(result.discount ?? 0),
-          sourceType: result.sourceType,
-          purchaseDate: result.purchaseDate ?? '',
-          dateExtracted: result.dateExtracted ? '1' : '0',
-          hadParsingIssues: result.hadParsingIssues ? '1' : '0',
-          imageUri: savedImageUri,
-        },
-      });
+      await handleProcessSuccess(result, savedImageUri);
     } catch (err) {
       abortControllerRef.current = null;
       if (err instanceof Error && err.name === 'AbortError') {
         setMode('idle');
+        return;
+      }
+      const kind = err instanceof GeminiVisionError ? err.kind : 'network';
+      setErrorKind(kind);
+      setMode('error');
+    }
+  }
+
+  async function handleProceedText() {
+    if (!nlpText.trim()) return;
+    Keyboard.dismiss();
+    setMode('processing');
+    setProcessingStatus('Analyzing text...');
+
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const result = await extractText(nlpText, abortControllerRef.current.signal);
+      abortControllerRef.current = null;
+      await handleProcessSuccess(result);
+    } catch (err) {
+      abortControllerRef.current = null;
+      if (err instanceof Error && err.name === 'AbortError') {
+        setMode('text');
         return;
       }
       const kind = err instanceof GeminiVisionError ? err.kind : 'network';
@@ -286,10 +316,11 @@ export default function ScanScreen() {
 
   function handleErrorPrimaryPress() {
     if (errorKind === 'network') {
-      handleProceed();
+      if (nlpText.trim().length > 0) handleProceedText();
+      else handleProceed();
     } else {
       setPhotoUri(null);
-      setMode('idle');
+      setMode(nlpText.trim().length > 0 ? 'text' : 'idle');
     }
   }
 
@@ -314,12 +345,14 @@ export default function ScanScreen() {
     return (
       <View style={styles.processingContainer}>
         <StatusBar barStyle="light-content" />
-        {photoUri && (
+        {photoUri ? (
           <Image
             source={{ uri: photoUri }}
             style={[StyleSheet.absoluteFill, { transform: [{ scale: 1.05 }] }]}
             resizeMode="cover"
           />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#F8FAFC' }]} />
         )}
         <ProcessingUI status={processingStatus} onCancel={handleCancelProcess} />
       </View>
@@ -331,13 +364,10 @@ export default function ScanScreen() {
     return (
       <StateView
         icon={copy.icon}
-        iconTone="error"
         title={copy.title}
         subtitle={copy.subtitle}
         primaryLabel={copy.primaryLabel}
         onPrimaryPress={handleErrorPrimaryPress}
-        secondaryLabel={errorKind === 'network' ? 'Retake Photo' : 'Enter manually'}
-        onSecondaryPress={errorKind === 'network' ? handleRetake : handleEnterManually}
         tertiaryLabel={errorKind === 'network' ? 'Enter manually' : undefined}
         onTertiaryPress={errorKind === 'network' ? handleEnterManually : undefined}
       />
@@ -358,31 +388,132 @@ export default function ScanScreen() {
   }
 
   return (
-    <View style={styles.idleContainer}>
+    <KeyboardAvoidingView 
+      style={styles.idleContainer} 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
-      <View style={styles.contentCard}>
-        <View style={styles.iconCircle}>
-          <Ionicons name="document-text-outline" size={32} color="#0F172A" />
-        </View>
-        <Text style={styles.title}>Scan a receipt</Text>
-        <Text style={styles.subtitle}>
-          Take a photo of a receipt or Indonesian payment proof. We extract the details — you review them before anything is saved.
-        </Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.contentCard}>
+          <View style={styles.segmentControl}>
+            <TouchableOpacity 
+              style={[styles.segmentBtn, mode === 'idle' && styles.segmentBtnActive]}
+              onPress={() => { setMode('idle'); Keyboard.dismiss(); }}
+            >
+              <Ionicons name="scan-outline" size={16} color={mode === 'idle' ? colors.primary : colors.textSecondary} />
+              <Text style={[styles.segmentText, mode === 'idle' && styles.segmentTextActive]}>Scan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.segmentBtn, mode === 'text' && styles.segmentBtnActive]}
+              onPress={() => setMode('text')}
+            >
+              <Ionicons name="chatbox-ellipses-outline" size={16} color={mode === 'text' ? colors.primary : colors.textSecondary} />
+              <Text style={[styles.segmentText, mode === 'text' && styles.segmentTextActive]}>Type</Text>
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.buttonGroup}>
-          <Button label="Open Camera" variant="primary" onPress={handleOpenCamera} style={styles.ctaButton} />
-          <Button label="Choose from Gallery" variant="secondary" onPress={handlePickFromGallery} style={styles.ctaButton} />
-        </View>
+          {mode === 'idle' ? (
+            <>
+              <View style={styles.iconCircle}>
+                <Ionicons name="document-text-outline" size={32} color="#0F172A" />
+              </View>
+              <Text style={styles.title}>Scan a receipt</Text>
+              <Text style={styles.subtitle}>
+                Take a photo of a receipt or Indonesian payment proof. We extract the details ?" you review them before anything is saved.
+              </Text>
+              <View style={styles.buttonGroup}>
+                <Button label="Open Camera" variant="primary" onPress={handleOpenCamera} style={styles.ctaButton} />
+                <Button label="Choose from Gallery" variant="secondary" onPress={handlePickFromGallery} style={styles.ctaButton} />
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.title, { marginTop: spacing.md }]}>Quick Add</Text>
+              <Text style={styles.subtitle}>
+                Type what you bought naturally. We'll organize it for you.
+              </Text>
+              <TextInput
+                style={styles.textInputArea}
+                placeholder="e.g., Makan sate padang 25rb sama es teh manis 5rb pake gopay"
+                placeholderTextColor={colors.textTertiary}
+                multiline
+                autoFocus
+                value={nlpText}
+                onChangeText={setNlpText}
+              />
+              <View style={styles.buttonGroup}>
+                <Button 
+                  label="Parse Details" 
+                  variant="primary" 
+                  onPress={handleProceedText} 
+                  style={styles.ctaButton} 
+                  disabled={!nlpText.trim()}
+                />
+              </View>
+            </>
+          )}
 
-        <TouchableOpacity onPress={handleEnterManually} style={styles.manualLink} accessibilityRole="button">
-          <Text style={styles.manualLinkText}>Enter manually instead</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+          <TouchableOpacity onPress={handleEnterManually} style={styles.manualLink} accessibilityRole="button">
+            <Text style={styles.manualLinkText}>Enter completely manually</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+
+  segmentControl: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: radius.pill,
+    padding: 4,
+    marginBottom: spacing.xl,
+    width: '100%',
+  },
+  segmentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+  },
+  segmentBtnActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  segmentText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginLeft: 6,
+  },
+  segmentTextActive: {
+    fontFamily: 'Manrope_700Bold',
+    color: colors.primary,
+  },
+  textInputArea: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.xl,
+    minHeight: 120,
+    maxHeight: 200,
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 16,
+    color: colors.textPrimary,
+    textAlignVertical: 'top',
+  },
+
   flex: { flex: 1 },
   idleContainer: {
     flex: 1,

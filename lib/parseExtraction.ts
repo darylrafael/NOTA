@@ -21,7 +21,8 @@ export function parseAndValidateExtraction(rawText: string): GeminiExtractionRes
   const warnings: ExtractionWarning[] = [];
   let clamped = false;
 
-  const merchantName = typeof root.merchantName === 'string' ? root.merchantName.trim() : '';
+  let merchantName = typeof root.merchantName === 'string' ? root.merchantName.trim() : '';
+  if (merchantName.toLowerCase() === 'null') merchantName = '';
   if (!merchantName) warnings.push('missing_merchant');
 
   const sourceType: SourceType =

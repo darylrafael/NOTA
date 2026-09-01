@@ -12,13 +12,17 @@ import {
   TextInput,
   ActionSheetIOS,
   Platform,
+  LayoutAnimation,
+  UIManager,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { getAllReceipts, getAllItemSpend, deleteReceipt, getTotalReceiptCount, getReceiptsNeedingReview, ReceiptSummary, ItemSpendRecord } from '../../db/queries';
+import { getAllReceipts, getAllItemSpend, deleteReceipt, getTotalReceiptCount, getReceiptsNeedingReview, getUpcomingBillsThisMonth, ReceiptSummary, ItemSpendRecord } from '../../db/queries';
+import { UpcomingBill } from '../../types/receipt';
 import { formatRupiah, normalizeMerchantName } from '../../lib/format';
 import { formatPurchaseDate, currentMonthRange, previousMonthRange, isInRange, parsePurchaseDate } from '../../lib/date';
 import { CATEGORIES, getCategoryMeta } from '../../constants/categories';
@@ -90,6 +94,127 @@ function CategoryChip({
   );
 }
 
+
+
+function ExpandableBillRow({ bill }: { bill: UpcomingBill }) {
+  const [expanded, setExpanded] = useState(false);
+  const router = useRouter();
+
+  const handleToggle = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded(!expanded);
+  };
+
+  const d = new Date(bill.dueDate);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dateStr = !isNaN(d.getTime()) ? `${months[d.getMonth()]} ${d.getDate()}` : '';
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const isOverdue = !bill.isPaid && d.getTime() < today.getTime();
+  const isToday = !bill.isPaid && d.getTime() === today.getTime();
+
+  return (
+    <Pressable 
+      onPress={bill.isPaid ? undefined : handleToggle}
+      style={({ pressed }) => [{
+        backgroundColor: colors.surface, 
+        borderRadius: radius.md, 
+        borderWidth: 1, 
+        borderColor: colors.border,
+        padding: spacing.md,
+        overflow: 'hidden',
+      }, pressed && !bill.isPaid && { opacity: 0.8 }]}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+          <View style={{ width: 36, height: 36, borderRadius: radius.sm, backgroundColor: bill.isPaid ? colors.border : colors.primary + '15', alignItems: 'center', justifyContent: 'center', marginRight: spacing.md }}>
+            <Ionicons name={getCategoryMeta(bill.rule.category).icon as any} size={18} color={bill.isPaid ? colors.textSecondary : colors.primary} />
+          </View>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.textPrimary }} numberOfLines={1}>{bill.rule.name}</Text>
+            <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: bill.isPaid ? colors.success : isOverdue ? colors.error : isToday ? colors.warning : colors.textSecondary, marginTop: 2 }}>
+                {(() => {
+                  if (bill.isPaid) return 'PAID';
+                  const dDate = new Date(bill.dueDate);
+                  const todayDate = new Date();
+                  todayDate.setHours(0,0,0,0);
+                  dDate.setHours(0,0,0,0);
+                  const diff = Math.ceil((dDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+                  if (diff < 0) return 'OVERDUE';
+                  if (diff === 0) return 'DUE TODAY';
+                  return `DUE IN ${diff} DAYS`;
+                })()}
+              </Text>
+          </View>
+        </View>
+
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.textPrimary }}>{formatRupiah(bill.rule.amount)}</Text>
+          {bill.isPaid ? (
+            <View style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.success + '20', borderRadius: radius.pill, marginTop: 4 }}>
+              <Text style={{ fontSize: 10, fontFamily: 'Manrope_700Bold', color: colors.success }}>PAID</Text>
+            </View>
+          ) : isOverdue ? (
+            <View style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.error + '20', borderRadius: radius.pill, marginTop: 4 }}>
+              <Text style={{ fontSize: 10, fontFamily: 'Manrope_700Bold', color: colors.error }}>OVERDUE</Text>
+            </View>
+          ) : isToday ? (
+            <View style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.warning + '20', borderRadius: radius.pill, marginTop: 4 }}>
+              <Text style={{ fontSize: 10, fontFamily: 'Manrope_700Bold', color: colors.warning }}>DUE TODAY</Text>
+            </View>
+          ) : (
+             <View style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.warning + '20', borderRadius: radius.pill, marginTop: 4 }}>
+               <Text style={{ fontSize: 10, fontFamily: 'Manrope_700Bold', color: colors.warning }}>UPCOMING</Text>
+             </View>
+          )}
+        </View>
+      </View>
+
+      {expanded && !bill.isPaid && (
+        <View style={{ marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border }}>
+          <TouchableOpacity 
+            style={{ backgroundColor: colors.primary, paddingVertical: 12, borderRadius: radius.pill, alignItems: 'center' }}
+            activeOpacity={0.8}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push({
+                pathname: '/confirm',
+                params: {
+                  fromRecurring: bill.rule.name,
+                  recurringDueDate: bill.dueDate,
+                  recurringRuleId: bill.rule.id,
+                  merchantName: bill.rule.name,
+                  receiptTotal: String(bill.rule.amount),
+                  tax: '0',
+                  serviceCharge: '0',
+                  discount: '0',
+                  sourceType: 'receipt',
+                  purchaseDate: new Date().toISOString(),
+                  items: JSON.stringify([{
+                    name: bill.rule.name,
+                    quantity: 1,
+                    price: bill.rule.amount,
+                    lineTotal: bill.rule.amount,
+                    category: bill.rule.category,
+                  }])
+                }
+              });
+            }}
+          >
+            <Text style={{ color: '#FFF', fontFamily: 'Manrope_600SemiBold', fontSize: 13 }}>Record Payment</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 export default function HomeScreen() {
   const db = useSQLiteContext();
   const router = useRouter();
@@ -98,6 +223,7 @@ export default function HomeScreen() {
   const [totalReceipts, setTotalReceipts] = useState<number>(0);
   const [itemSpend, setItemSpend] = useState<ItemSpendRecord[]>([]);
   const [reviewQueueCount, setReviewQueueCount] = useState<number>(0);
+  const [upcomingBills, setUpcomingBills] = useState<UpcomingBill[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -125,11 +251,13 @@ export default function HomeScreen() {
         category: categoryFilter,
       };
 
-      const [receiptData, spendData, countData, reviewData] = await Promise.all([
+      const now = new Date();
+      const [receiptData, spendData, countData, reviewData, billsData] = await Promise.all([
         getAllReceipts(db, filters),
         getAllItemSpend(db),
         getTotalReceiptCount(db),
-        getReceiptsNeedingReview(db)
+        getReceiptsNeedingReview(db),
+        getUpcomingBillsThisMonth(db, now.getFullYear(), now.getMonth())
       ]);
       
       if (getIsActive()) {
@@ -137,6 +265,7 @@ export default function HomeScreen() {
         setItemSpend(spendData);
         setTotalReceipts(countData);
         setReviewQueueCount(reviewData.length);
+        setUpcomingBills(billsData || []);
         setIsLoading(false);
         setIsRefreshing(false);
       }
@@ -273,7 +402,7 @@ export default function HomeScreen() {
       <FlatList
         style={styles.flex}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 90 }]}
-        data={filteredReceipts}
+        data={filteredReceipts.slice(0, 5)}
         keyExtractor={(item) => item.id}
         refreshControl={
           <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.textPrimary} />
@@ -313,9 +442,7 @@ export default function HomeScreen() {
                     <TouchableOpacity onPress={() => setSearchVisible(true)}>
                       <Ionicons name="search-outline" size={24} color={colors.textPrimary} />
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => router.push('/price-book')}>
-                      <Ionicons name="pricetags-outline" size={24} color={colors.textPrimary} />
-                    </TouchableOpacity>
+                    
                     <TouchableOpacity onPress={() => router.push('/settings')}>
                       <Ionicons name="settings-outline" size={24} color={colors.textPrimary} />
                     </TouchableOpacity>
@@ -324,7 +451,50 @@ export default function HomeScreen() {
               )}
             </View>
 
-            {/* Review Queue Card */}
+            
+            {/* Upcoming Bills Section */}
+            {(() => {
+              const unpaidBills = upcomingBills.filter(b => !b.isPaid);
+              return !searchVisible && debouncedSearchQuery === '' && unpaidBills.length > 0 && (
+
+              <View style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: spacing.md, marginBottom: spacing.md }}>
+                  <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.textPrimary }}>
+                    Recurring Bills
+                  </Text>
+                  <TouchableOpacity onPress={() => router.push('/recurring')}>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.accent }}>See All</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={{ paddingHorizontal: spacing.md, gap: spacing.sm }}>
+                  {unpaidBills.sort((a, b) => {
+                    const dA = new Date(a.dueDate).getTime();
+                    const dB = new Date(b.dueDate).getTime();
+                    const today = new Date();
+                    today.setHours(0,0,0,0);
+                    
+                    const score = (bill: typeof a) => {
+                      if (bill.isPaid) return 5;
+                      const d = new Date(bill.dueDate).getTime();
+                      if (d < today.getTime()) return 1; // Overdue
+                      if (d === today.getTime()) return 2; // Due today
+                      if (d <= today.getTime() + (1000 * 60 * 60 * 24 * 3)) return 3; // Due soon (within 3 days)
+                      return 4; // Upcoming
+                    };
+                    
+                    const sA = score(a);
+                    const sB = score(b);
+                    if (sA !== sB) return sA - sB;
+                    return dA - dB;
+                  }).slice(0, 3).map(bill => (
+                    <ExpandableBillRow key={bill.rule.id} bill={bill} />
+                  ))}
+                </View>
+              </View>
+              );
+            })()}
+
+              {/* Review Queue Card */}
             {reviewQueueCount > 0 && !searchVisible && debouncedSearchQuery === '' && (
               <TouchableOpacity
                 style={styles.reviewQueueCard}
@@ -384,17 +554,17 @@ export default function HomeScreen() {
                       {categoryTotals.data.slice(0, 4).map(item => {
                         const pct = Math.round((item.amount / categoryTotals.total) * 100);
                         return (
-                          <View key={item.category} style={styles.legendItem}>
+                          <TouchableOpacity key={item.category} style={styles.legendItem} onPress={() => setCategoryFilter(item.category)} activeOpacity={0.7}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                               <View style={[styles.legendDot, { backgroundColor: item.meta.color }]} />
                               <Text style={styles.legendText} numberOfLines={1}>{item.category}</Text>
                             </View>
                             <Text style={styles.legendAmount}>
-                              {pct}% · {formatRupiah(item.amount)}
+                              {pct}% {'\\u00B7'} {formatRupiah(item.amount)}
                             </Text>
-                          </View>
-                        );
-                      })}
+                            </TouchableOpacity>
+                          );
+                        })}
                     </View>
                   </View>
                 )}
@@ -408,7 +578,42 @@ export default function HomeScreen() {
               )
             )}
 
-            {/* Horizontal Scrollable Category Chips (Mini) */}
+
+            
+              {/* Quick Actions Grid */}
+              {(!searchVisible && debouncedSearchQuery === '' && totalReceipts > 0) && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 32, marginBottom: 20, marginTop: 4 }}>
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/history')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="time" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>History</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/recurring')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="repeat" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Recurring</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/price-book')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="pricetag" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Prices</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/budget')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="wallet" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Budget</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Horizontal Scrollable Category Chips (Mini) */}
             {debouncedSearchQuery === '' && totalReceipts > 0 && (
               <View style={styles.categoryFilterContainerMini}>
                 <ScrollView
@@ -439,9 +644,11 @@ export default function HomeScreen() {
             {/* Section Header */}
             {totalReceipts > 0 && (
               <View style={styles.transactionHeaderSection}>
-                <Text style={styles.sectionTitle}>Transactions</Text>
-                <Text style={styles.transactionCountBadge}>{filteredReceipts.length}</Text>
-              </View>
+                  <Text style={styles.sectionTitle}>Transactions</Text>
+                  <TouchableOpacity onPress={() => router.push('/history')} activeOpacity={0.7}>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.accent }}>See All</Text>
+                  </TouchableOpacity>
+                </View>
             )}
           </View>
         }

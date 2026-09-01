@@ -4,25 +4,10 @@ import { Platform, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { colors, radius } from '../../constants/theme';
 function TabIcon({ name, focused, isScan = false, color }: { name: any; focused: boolean; isScan?: boolean; color: string }) {
-  if (isScan) {
-    return (
-      <View
-        style={{
-          width: 44,
-          height: 32,
-          borderRadius: radius.pill,
-          backgroundColor: focused ? colors.primary : colors.accentMuted,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Ionicons name={name} size={18} color={focused ? colors.textOnPrimary : colors.primary} />
-      </View>
-    );
-  }
+  
 
   return (
-    <View style={{ opacity: focused ? 1 : 0.7 }}>
+    <View style={{ opacity: 1 }}>
       <Ionicons name={name} size={22} color={color} />
     </View>
   );
@@ -34,7 +19,7 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false, // Clean iOS immersive experience (Large Title in body)
         tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textTertiary,
+        tabBarInactiveTintColor: '#8E8E93',
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
@@ -74,9 +59,9 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="forecast"
+        name="insights"
         options={{
-          title: 'Forecast',
+          title: 'Insights',
           tabBarIcon: ({ color, focused }) => (
             <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} focused={focused} color={color} />
           ),

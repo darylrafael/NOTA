@@ -155,6 +155,10 @@ function DateEditorInputs({
 
 export default function ConfirmScreen() {
   const params = useLocalSearchParams<{
+    fromRecurring?: string;
+    recurringDueDate?: string;
+    recurringRuleId?: string;
+    fromText?: string;
     items?: string;
     merchantName?: string;
     receiptId?: string;
@@ -353,6 +357,7 @@ export default function ConfirmScreen() {
   }
 
   function addItem() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setItems((prev) => [...prev, createBlankItem()]);
   }
 
@@ -375,6 +380,7 @@ export default function ConfirmScreen() {
   }
 
   async function handleSave() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     if (itemsTotal <= 0) {
@@ -543,7 +549,7 @@ export default function ConfirmScreen() {
           <TouchableOpacity onPress={handleCancel} hitSlop={{top:10, bottom:10, left:10, right:10}}>
             <Text style={styles.cancelHeaderText}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={styles.modalTitle}>{isEditMode ? 'Edit Receipt' : 'Review Items'}</Text>
+          <Text style={styles.modalTitle}>{params.fromRecurring ? 'Review Payment' : isEditMode ? 'Edit Receipt' : 'Review Items'}</Text>
           <View style={{ width: 45 }} />
         </View>
       </View>
@@ -562,14 +568,19 @@ export default function ConfirmScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {fromScan && (
-          <View style={styles.trustBanner}>
-            <Ionicons name="document-text-outline" size={16} color={colors.textPrimary} />
-            <Text style={styles.trustBannerText}>
-              Extracted from receipt. Please verify before saving.
-            </Text>
-          </View>
-        )}
+        {params.fromRecurring ? (
+            <View style={{ backgroundColor: colors.accent + '15', padding: spacing.md, borderRadius: radius.md, marginBottom: spacing.md, flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name="calendar-outline" size={16} color={colors.accent} style={{ marginRight: spacing.sm }} />
+              <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.accent }}>From recurring bill. This will add the payment to your transactions.</Text>
+            </View>
+          ) : fromScan ? (
+            <View style={styles.trustBanner}>
+              <Ionicons name="document-text-outline" size={16} color={colors.textPrimary} />
+              <Text style={styles.trustBannerText}>
+                {params.fromText === '1' ? 'Parsed from your description. Please verify before saving.' : 'Extracted from receipt. Please verify before saving.'}
+              </Text>
+            </View>
+          ) : null}
 
         {hadParsingIssues && fromScan && (
           <View style={styles.warningBanner}>
@@ -581,7 +592,7 @@ export default function ConfirmScreen() {
         )}
 
         <View style={styles.sectionBlock}>
-          <Text style={styles.sectionLabel}>RECEIPT</Text>
+          <Text style={styles.sectionLabel}>{params.fromRecurring ? 'SOURCE' : 'RECEIPT'}</Text>
           <View style={[styles.merchantCard, fromScan && !merchantName.trim() && styles.dateCardFallback]}>
             <TextInput
               style={styles.merchantInput}
@@ -594,26 +605,29 @@ export default function ConfirmScreen() {
             {fromScan && !merchantName.trim() && (
               <Text style={styles.dateHint}>Not found on the document — tap to enter the name.</Text>
             )}
-            <View style={styles.receiptMetaRow}>
-              <TouchableOpacity
-                style={styles.sourceChip}
-                onPress={() => {
-                  const order: SourceType[] = ['receipt', 'bank_transfer', 'ewallet', 'qris'];
-                  const next = order[(order.indexOf(sourceType) + 1) % order.length];
-                  setSourceType(next);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Document type"
-              >
-                <Ionicons name={sourceMeta.icon} size={12} color="#64748B" />
-                <Text style={styles.sourceChipText}>{sourceMeta.label}</Text>
-              </TouchableOpacity>
-            </View>
+            {params.fromRecurring ? null : (
+              <View style={styles.receiptMetaRow}>
+                <TouchableOpacity
+                  style={styles.sourceChip}
+                  onPress={() => {
+                    const order: ('receipt' | 'bank_transfer' | 'ewallet' | 'qris')[] = ['receipt', 'bank_transfer', 'ewallet', 'qris'];
+                    const next = order[(order.indexOf(sourceType) + 1) % order.length];
+                    Haptics.selectionAsync();
+                    setSourceType(next);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Document type"
+                >
+                  <Ionicons name={sourceMeta.icon} size={12} color="#64748B" />
+                  <Text style={styles.sourceChipText}>{sourceMeta.label}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
 
         <View style={styles.sectionBlock}>
-          <Text style={styles.sectionLabel}>PURCHASE DATE</Text>
+          <Text style={styles.sectionLabel}>{params.fromRecurring ? 'PAYMENT DATE' : 'PURCHASE DATE'}</Text>
           <TouchableOpacity
             style={[styles.dateCard, !dateExtracted && fromScan && styles.dateCardFallback]}
             onPress={() => setShowDateEditor((open) => !open)}
@@ -623,7 +637,27 @@ export default function ConfirmScreen() {
             <View>
               <Text style={styles.dateValue}>{formatPurchaseDate(purchaseDate)}</Text>
               <Text style={styles.dateHint}>
-                {dateExtracted
+                {params.fromRecurring && params.recurringDueDate ? (
+                  (() => {
+                    const today = new Date();
+                    today.setHours(0,0,0,0);
+                    const due = new Date(params.recurringDueDate as string);
+                    due.setHours(0,0,0,0);
+                    const diffTime = today.getTime() - due.getTime();
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                    
+                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                    const dueStr = `Due ${due.getDate()} ${months[due.getMonth()]}`;
+                    
+                    if (diffDays > 0) {
+                      return `${dueStr} \u00B7 ${diffDays} day${diffDays > 1 ? 's' : ''} overdue`;
+                    } else if (diffDays === 0) {
+                      return `${dueStr} \u00B7 Due today`;
+                    } else {
+                      return `${dueStr}`;
+                    }
+                  })()
+                ) : dateExtracted
                   ? 'Found on document'
                   : fromScan
                     ? "Couldn't find the date, please set one."
@@ -647,12 +681,14 @@ export default function ConfirmScreen() {
 
         <View style={styles.sectionBlock}>
           <View style={styles.itemsHeaderRow}>
-            <Text style={styles.sectionLabel}>PURCHASED ITEMS ({items.length})</Text>
-            <TouchableOpacity onPress={addItem} style={styles.addRowInlineBtn} activeOpacity={0.7}>
-              <Ionicons name="add" size={14} color="#0F172A" />
-              <Text style={styles.addRowInlineText}>Add Item</Text>
-            </TouchableOpacity>
-          </View>
+              <Text style={styles.sectionLabel}>{params.fromRecurring ? 'AMOUNT & CATEGORY' : `PURCHASED ITEMS (${items.length})`}</Text>
+              {!params.fromRecurring && (
+                <TouchableOpacity onPress={addItem} style={styles.addRowInlineBtn} activeOpacity={0.7}>
+                  <Ionicons name="add" size={14} color="#0F172A" />
+                  <Text style={styles.addRowInlineText}>Add Item</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
           <View style={styles.itemsContainer}>
             {items.map((item, index) => {
@@ -760,7 +796,7 @@ export default function ConfirmScreen() {
             )}
 
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Service Charge</Text>
+              <Text style={styles.summaryLabel}>Service & Fees</Text>
               <View style={styles.chargeInputRow}>
                 <Text style={styles.currencyPrefix}>Rp</Text>
                 <TextInput

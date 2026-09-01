@@ -110,6 +110,41 @@ export async function initDatabase(db: SQLite.SQLiteDatabase) {
     await db.execAsync(`PRAGMA user_version = 4;`);
   }
 
+  if (currentVersion === 4) {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS recurring_rules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Other',
+        billing_date INTEGER NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_recurring_rules_active ON recurring_rules(is_active);
+    `);
+    currentVersion = 5;
+    await db.execAsync(`PRAGMA user_version = 5;`);
+  }
+
+
+  if (currentVersion === 5) {
+    await db.execAsync(`
+      ALTER TABLE recurring_rules ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly';
+    `);
+    currentVersion = 6;
+    await db.execAsync(`PRAGMA user_version = 6;`);
+  }
+
+  if (currentVersion === 6) {
+    await db.execAsync(`
+      ALTER TABLE receipts ADD COLUMN recurring_rule_id TEXT;
+    `);
+    currentVersion = 7;
+    await db.execAsync(`PRAGMA user_version = 7;`);
+  }
+
   isInitialized = true;
 }
 

@@ -13,6 +13,18 @@ export interface Receipt {
   discount: number;
 }
 
+export interface RecurringRule {
+  id: string;
+  name: string;
+  amount: number;
+  category: string;
+  billing_date: number;
+  frequency: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ReceiptItem {
   id: string;
   receipt_id: string;
@@ -31,6 +43,7 @@ interface BackupData {
   receiptItems: ReceiptItem[];
   budgets: { category: string; monthly_limit: number }[];
   merchantPreferences?: { merchant_name: string; category: string; created_at: string; updated_at: string }[];
+  recurringRules?: RecurringRule[];
 }
 
 export async function exportToCsv(db: SQLiteDatabase): Promise<string> {
@@ -81,8 +94,12 @@ export async function exportToJson(db: SQLiteDatabase): Promise<string> {
   const receiptItems = await db.getAllAsync<ReceiptItem>('SELECT * FROM receipt_items');
   const budgets = await db.getAllAsync<{ category: string; monthly_limit: number }>('SELECT * FROM budgets');
   let merchantPreferences: any[] = [];
+  let recurringRules: any[] = [];
   if (user_version >= 3) {
     merchantPreferences = await db.getAllAsync('SELECT * FROM merchant_preferences');
+  }
+  if (user_version >= 5) {
+    recurringRules = await db.getAllAsync('SELECT * FROM recurring_rules');
   }
 
   const backup: BackupData = {
@@ -93,6 +110,7 @@ export async function exportToJson(db: SQLiteDatabase): Promise<string> {
     receiptItems,
     budgets,
     merchantPreferences,
+    recurringRules,
   };
 
   return JSON.stringify(backup, null, 2);
@@ -114,6 +132,7 @@ export async function restoreFromJson(db: SQLiteDatabase, jsonString: string): P
   const receiptItems = data.receiptItems as ReceiptItem[];
   const budgets = data.budgets as { category: string; monthly_limit: number }[];
   const merchantPreferences = Array.isArray(data.merchantPreferences) ? data.merchantPreferences : [];
+  const recurringRules = Array.isArray(data.recurringRules) ? data.recurringRules : [];
 
   const receiptIds = new Set(receipts.map(r => r.id));
   for (const item of receiptItems) {
@@ -130,19 +149,23 @@ export async function restoreFromJson(db: SQLiteDatabase, jsonString: string): P
     if (user_version >= 3) {
       await db.execAsync('DELETE FROM merchant_preferences;');
     }
+    if (user_version >= 5) {
+      await db.execAsync('DELETE FROM recurring_rules;');
+    }
 
     // 2. Restore receipts
     for (const r of receipts) {
       await db.runAsync(
-        `INSERT INTO receipts (id, merchant_name, total_amount, purchase_date, created_at, updated_at, tax, service_charge, source_type, discount, image_uri, is_shared_expense, original_receipt_data)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          r.id, r.merchant_name, r.total_amount, r.purchase_date, r.created_at, r.updated_at, 
-          r.tax || 0, r.service_charge || 0, r.source_type || 'receipt', r.discount || 0, 
-          (r as any).image_uri || null, 
-          (r as any).is_shared_expense || 0, 
-          (r as any).original_receipt_data || null
-        ]
+        `INSERT INTO receipts (id, merchant_name, total_amount, purchase_date, created_at, updated_at, tax, service_charge, source_type, discount, image_uri, is_shared_expense, original_receipt_data, recurring_rule_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            r.id, r.merchant_name, r.total_amount, r.purchase_date, r.created_at, r.updated_at, 
+            r.tax || 0, r.service_charge || 0, r.source_type || 'receipt', r.discount || 0, 
+            (r as any).image_uri || null, 
+            (r as any).is_shared_expense || 0, 
+            (r as any).original_receipt_data || null,
+            (r as any).recurring_rule_id || null
+          ]
       );
     }
 
@@ -170,6 +193,15 @@ export async function restoreFromJson(db: SQLiteDatabase, jsonString: string): P
         await db.runAsync(
           'INSERT INTO merchant_preferences (merchant_name, category, created_at, updated_at) VALUES (?, ?, ?, ?)',
           [m.merchant_name, m.category, m.created_at || '', m.updated_at || '']
+        );
+      }
+    }
+    // 6. Restore recurring rules
+    if (user_version >= 5) {
+      for (const r of recurringRules) {
+        await db.runAsync(
+          'INSERT INTO recurring_rules (id, name, amount, category, billing_date, is_active, frequency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [r.id, r.name, r.amount, r.category, r.billing_date, r.is_active ?? 1, r.frequency || 'monthly', r.created_at || '', r.updated_at || '']
         );
       }
     }

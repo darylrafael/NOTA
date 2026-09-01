@@ -115,6 +115,17 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
           
+          <TouchableOpacity style={[styles.actionRow, styles.actionRowDivider]} onPress={() => router.push('/recurring')} disabled={isProcessing}>
+            <View style={[styles.iconBox, { backgroundColor: colors.accent + '15' }]}>
+              <Ionicons name="calendar-outline" size={20} color={colors.accent} />
+            </View>
+            <View style={styles.actionText}>
+              <Text style={styles.actionTitle}>Recurring Bills</Text>
+              <Text style={styles.actionSubtitle}>Manage regular subscriptions</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </TouchableOpacity>
+          
           <TouchableOpacity style={styles.actionRow} onPress={() => router.push('/merchant/rules')} disabled={isProcessing}>
             <View style={[styles.iconBox, { backgroundColor: '#8B5CF615' }]}>
               <Ionicons name="pricetags-outline" size={20} color="#8B5CF6" />

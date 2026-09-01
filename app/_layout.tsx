@@ -90,8 +90,8 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: colors.background },
           }}
         >
-          <Stack.Screen
-            name="confirm"
+          <Stack.Screen name="history" options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="confirm"
             options={{ headerShown: false, presentation: 'modal' }}
           />
           <Stack.Screen

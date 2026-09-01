@@ -12,7 +12,8 @@ export const colors = {
   accentMuted: '#EFF6FF',
   background: '#FAFAFA', // Very light gray, not pure white
   surface: '#FFFFFF',
-  border: '#E5E7EB', // Subtle gray border
+  border: '#E5E7EB',
+  borderInput: '#D1D5DB', // Subtle gray border
   textPrimary: '#111827', // Almost black
   textSecondary: '#6B7280', // Gray for secondary info
   textTertiary: '#9CA3AF',

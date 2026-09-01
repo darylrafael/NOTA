@@ -77,3 +77,24 @@ export interface ReviewQueueItem {
   imageUri: string | null;
   reasons: ReviewReason[];
 }
+
+export interface RecurringRule {
+  id: string;
+  name: string;
+  amount: number;
+  category: string;
+  billing_date: number;
+  frequency: string;
+  last_paid_date?: string | null;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpcomingBill {
+  rule: RecurringRule;
+  isPaid: boolean;
+  isOverdue: boolean;
+  paidDate?: string;
+  dueDate: string; // ISO date for this month
+}

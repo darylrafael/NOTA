@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { randomUUID } from 'expo-crypto';
-import { EditableReceiptItem, ReviewQueueItem, ReviewReason, PriceBookItem, PriceBookTransaction } from '../types/receipt';
+import { EditableReceiptItem, ReviewQueueItem, ReviewReason, PriceBookItem, PriceBookTransaction, RecurringRule, UpcomingBill } from '../types/receipt';
 import { roundRupiah } from '../lib/money';
 import { allocateReceiptTotalByCategory, TOTAL_MATCH_TOLERANCE } from '../lib/receiptMath';
 import { evaluateReviewReasons } from '../lib/reviewQueue';
@@ -64,6 +64,7 @@ export interface CategoryItemDetail {
 }
 
 export interface ReceiptFilter {
+  merchantName?: string;
   searchQuery?: string;
   startDate?: string;
   endDate?: string;
@@ -133,7 +134,7 @@ export async function getAllReceipts(
 
   baseQuery += `
     GROUP BY r.id
-    ORDER BY COALESCE(NULLIF(r.created_at, ''), r.updated_at, r.purchase_date) DESC, r.purchase_date DESC
+    ORDER BY r.purchase_date DESC, r.created_at DESC
   `;
 
   const rows = await db.getAllAsync<{
@@ -856,4 +857,378 @@ export async function getPriceBookItemHistory(db: SQLite.SQLiteDatabase, normali
     ORDER BY r.purchase_date DESC, r.created_at DESC;
   `;
   return await db.getAllAsync<PriceBookTransaction>(query, [normalizedName]);
+}
+
+
+export async function getRecurringRules(db: SQLite.SQLiteDatabase): Promise<RecurringRule[]> {
+  const rules = await db.getAllAsync<RecurringRule>('SELECT * FROM recurring_rules ORDER BY name ASC');
+  
+  // Fetch last paid date heuristically for each rule
+  const receipts = await db.getAllAsync<{ merchant_name: string; total_amount: number; purchase_date: string; recurring_rule_id: string | null }>(
+    'SELECT merchant_name, total_amount, purchase_date, recurring_rule_id FROM receipts ORDER BY purchase_date DESC'
+  );
+  
+  return rules.map(rule => {
+    const tolerance = rule.amount * 0.10;
+    const minAmount = rule.amount - tolerance;
+    const maxAmount = rule.amount + tolerance;
+    const lowerRuleName = rule.name.toLowerCase().trim();
+    
+    let last_paid_date = null;
+    for (const r of receipts) {
+        if (r.recurring_rule_id === rule.id) {
+          last_paid_date = r.purchase_date;
+          break;
+        }
+        if (!r.recurring_rule_id && r.merchant_name && r.merchant_name.toLowerCase().includes(lowerRuleName)) {
+          if (r.total_amount >= minAmount && r.total_amount <= maxAmount) {
+            last_paid_date = r.purchase_date;
+            break;
+          }
+        }
+      }
+    return { ...rule, last_paid_date };
+  });
+}
+
+export async function addRecurringRule(db: SQLite.SQLiteDatabase, rule: Omit<RecurringRule, 'id' | 'created_at' | 'updated_at'>): Promise<string> {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    'INSERT INTO recurring_rules (id, name, amount, category, billing_date, is_active, frequency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, rule.name, rule.amount, rule.category, rule.billing_date, rule.is_active, rule.frequency || 'monthly', now, now]
+  );
+  return id;
+}
+
+export async function updateRecurringRule(db: SQLite.SQLiteDatabase, id: string, updates: Partial<RecurringRule>): Promise<void> {
+  const current = await db.getFirstAsync<RecurringRule>('SELECT * FROM recurring_rules WHERE id = ?', [id]);
+  if (!current) return;
+
+  const name = updates.name !== undefined ? updates.name : current.name;
+  const amount = updates.amount !== undefined ? updates.amount : current.amount;
+  const category = updates.category !== undefined ? updates.category : current.category;
+  const billing_date = updates.billing_date !== undefined ? updates.billing_date : current.billing_date;
+  const is_active = updates.is_active !== undefined ? updates.is_active : current.is_active;
+  const frequency = updates.frequency !== undefined ? updates.frequency : current.frequency;
+  const now = new Date().toISOString();
+
+  await db.runAsync(
+    'UPDATE recurring_rules SET name = ?, amount = ?, category = ?, billing_date = ?, is_active = ?, frequency = ?, updated_at = ? WHERE id = ?',
+    [name, amount, category, billing_date, is_active, frequency, now, id]
+  );
+}
+
+export async function deleteRecurringRule(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync('DELETE FROM recurring_rules WHERE id = ?', [id]);
+}
+
+export async function getUpcomingBillsThisMonth(db: SQLite.SQLiteDatabase, year: number, month: number): Promise<UpcomingBill[]> {
+  const rules = await db.getAllAsync<RecurringRule>('SELECT * FROM recurring_rules WHERE is_active = 1');
+  
+  // Pad month and year for LIKE query
+  const monthStr = (month + 1).toString().padStart(2, '0');
+  const monthPrefix = `${year}-${monthStr}-`;
+  
+  // Get all receipts for this month to check if paid. DO NOT INCLUDE SHARED EXPENSES.
+  const receipts = await db.getAllAsync<{ id: string; merchant_name: string; total_amount: number; purchase_date: string; recurring_rule_id: string | null }>(
+    'SELECT id, merchant_name, total_amount, purchase_date, recurring_rule_id FROM receipts WHERE purchase_date LIKE ? AND is_shared_expense = 0',
+    [`${monthPrefix}%`]
+  );
+  
+  const receiptItems = await db.getAllAsync<{ id: string; receipt_id: string; name: string; line_total: number; purchase_date: string }>(
+    `SELECT i.id, i.receipt_id, i.name, i.line_total, r.purchase_date 
+     FROM receipt_items i 
+     JOIN receipts r ON i.receipt_id = r.id 
+     WHERE r.purchase_date LIKE ? AND r.is_shared_expense = 0`,
+    [`${monthPrefix}%`]
+  );
+
+  const usedReceiptIds = new Set<string>();
+  const usedItemIds = new Set<string>();
+
+  return rules.map(rule => {
+    // Generate safe due date
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const safeDate = Math.min(rule.billing_date, daysInMonth);
+    const dueDate = `${monthPrefix}${safeDate.toString().padStart(2, '0')}`;
+
+    const tolerance = rule.amount * 0.10;
+    const minAmount = rule.amount - tolerance;
+    const maxAmount = rule.amount + tolerance;
+    const lowerRuleName = rule.name.toLowerCase().trim();
+
+    let isPaid = false;
+    let paidDate: string | undefined;
+
+    // Check receipt level
+    for (const r of receipts) {
+        if (usedReceiptIds.has(r.id)) continue;
+        
+        // Match by exact ID if available
+        if (r.recurring_rule_id === rule.id) {
+          isPaid = true;
+          paidDate = r.purchase_date;
+          usedReceiptIds.add(r.id);
+          break;
+        }
+
+        // Heuristic fallback for older receipts without the ID
+        if (!r.recurring_rule_id && r.merchant_name && r.merchant_name.toLowerCase().includes(lowerRuleName)) {
+          if (r.total_amount >= minAmount && r.total_amount <= maxAmount) {
+            isPaid = true;
+            paidDate = r.purchase_date;
+            usedReceiptIds.add(r.id);
+            break;
+          }
+        }
+      }
+
+    // Check item level
+    if (!isPaid) {
+      for (const item of receiptItems) {
+        if (usedItemIds.has(item.id)) continue;
+        
+        if (item.name.toLowerCase().includes(lowerRuleName)) {
+          if (item.line_total >= minAmount && item.line_total <= maxAmount) {
+            isPaid = true;
+            paidDate = item.purchase_date;
+            usedItemIds.add(item.id);
+            break;
+          }
+        }
+      }
+    }
+
+    // Calculate overdue
+    let isOverdue = false;
+    if (!isPaid) {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const d = new Date(dueDate);
+      d.setHours(0,0,0,0);
+      if (d.getTime() < today.getTime()) {
+        isOverdue = true;
+      }
+    }
+
+    return { rule, isPaid, dueDate, isOverdue, paidDate };
+  });
+}
+
+
+export interface RecurringSuggestion {
+  name: string;
+  amount: number;
+  category: string;
+  occurrences: number;
+  lastDate: string;
+  firstDate: string;
+}
+
+export async function getRecurringSuggestions(db: SQLite.SQLiteDatabase): Promise<RecurringSuggestion[]> {
+  // Finds items with same name, similar amount (+/- 10%), occurring >= 2 times in different months
+  // Skips items already managed in recurring_rules
+  
+  const query = `
+    WITH ItemStats AS (
+      SELECT 
+        LOWER(TRIM(i.name)) as clean_name,
+        MAX(i.name) as display_name,
+        i.category,
+        AVG(i.line_total) as avg_amount,
+        COUNT(DISTINCT strftime('%Y-%m', r.purchase_date)) as unique_months,
+        MAX(r.purchase_date) as last_date, MIN(r.purchase_date) as first_date
+      FROM receipt_items i
+      JOIN receipts r ON i.receipt_id = r.id
+      
+      WHERE r.is_shared_expense = 0
+      AND i.line_total >= 10000
+      AND LOWER(TRIM(i.name)) NOT IN ('kantong plastik', 'plastik', 'ongkir', 'service charge', 'tax', 'pajak', 'admin', 'biaya admin', 'donasi', 'parkir', 'parking', 'shopping bag')
+      AND LOWER(TRIM(i.name)) NOT LIKE '%kresek%'
+      AND LOWER(TRIM(i.name)) NOT LIKE '%plastik%'
+      GROUP BY LOWER(TRIM(i.name)), i.category
+      HAVING unique_months >= 2
+    )
+    SELECT * FROM ItemStats
+    WHERE NOT EXISTS (
+      SELECT 1 FROM recurring_rules rr 
+      WHERE LOWER(TRIM(rr.name)) = clean_name OR LOWER(TRIM(rr.name)) = LOWER(TRIM(display_name))
+    )
+    ORDER BY unique_months DESC, last_date DESC
+  `;
+  
+  const rows = await db.getAllAsync<any>(query);
+  return rows.map(r => ({
+    name: r.display_name,
+    amount: Math.round(r.avg_amount),
+    category: r.category,
+    occurrences: r.unique_months,
+    lastDate: r.last_date,
+    firstDate: r.first_date
+  }));
+}
+
+
+export async function getMonthlyItemSpend(
+  db: SQLite.SQLiteDatabase,
+  startDate: string,
+  endDate: string
+): Promise<ItemSpendRecord[]> {
+  await initDatabase(db);
+  const rows = await db.getAllAsync<{
+    receiptId: string;
+    category: string;
+    purchaseDate: string;
+    lineTotal: number;
+    totalAmount: number;
+  }>(`
+    SELECT
+      r.id as receiptId,
+      ri.category as category,
+      r.purchase_date as purchaseDate,
+      COALESCE(NULLIF(ri.line_total, 0), ri.price * ri.quantity) as lineTotal,
+      r.total_amount as totalAmount
+    FROM receipt_items ri
+    JOIN receipts r ON ri.receipt_id = r.id
+    WHERE r.purchase_date >= ? AND r.purchase_date <= ?
+  `, [startDate, endDate]);
+
+  const receipts = new Map<string, {
+    purchaseDate: string;
+    totalAmount: number;
+    items: { category: string; lineTotal: number }[];
+  }>();
+
+  for (const row of rows) {
+    const receipt = receipts.get(row.receiptId) ?? {
+      purchaseDate: row.purchaseDate,
+      totalAmount: row.totalAmount,
+      items: [],
+    };
+    receipt.items.push({ category: row.category, lineTotal: row.lineTotal });
+    receipts.set(row.receiptId, receipt);
+  }
+
+  return Array.from(receipts.entries()).flatMap(([receiptId, receipt]) =>
+    allocateReceiptTotalByCategory(receipt.items, receipt.totalAmount).map((allocation) => ({
+      receiptId,
+      purchaseDate: receipt.purchaseDate,
+      category: allocation.category,
+      amount: allocation.amount,
+    }))
+  );
+}
+
+export interface TopMerchant {
+  merchantName: string;
+  totalAmount: number;
+  visitCount: number;
+}
+
+export async function getTopMerchants(
+  db: SQLite.SQLiteDatabase,
+  startDate: string,
+  endDate: string,
+  orderBy: 'spending' | 'frequency' = 'spending'
+): Promise<TopMerchant[]> {
+  await initDatabase(db);
+  const orderClause = orderBy === 'spending' ? 'totalAmount DESC' : 'visitCount DESC, totalAmount DESC';
+  
+  const rows = await db.getAllAsync<{
+    merchantName: string;
+    totalAmount: number;
+    visitCount: number;
+  }>(`
+    SELECT 
+      TRIM(merchant_name) as merchantName,
+      SUM(total_amount) as totalAmount,
+      COUNT(id) as visitCount
+    FROM receipts
+    WHERE purchase_date >= ? AND purchase_date <= ?
+    GROUP BY LOWER(TRIM(merchant_name))
+    ORDER BY ${orderClause}
+    LIMIT 20
+  `, [startDate, endDate]);
+  
+  return rows;
+}
+
+export async function getMerchantSummary(
+  db: SQLite.SQLiteDatabase,
+  merchantName: string,
+  startDate: string,
+  endDate: string
+) {
+  await initDatabase(db);
+  // Using LIKE for case-insensitive match on merchant name
+  const row = await db.getFirstAsync<{
+    totalAmount: number;
+    visitCount: number;
+  }>(`
+    SELECT 
+      SUM(total_amount) as totalAmount,
+      COUNT(id) as visitCount
+    FROM receipts
+    WHERE LOWER(TRIM(merchant_name)) = LOWER(TRIM(?))
+      AND purchase_date >= ? AND purchase_date <= ?
+  `, [merchantName, startDate, endDate]);
+  
+  return row || { totalAmount: 0, visitCount: 0 };
+}
+
+export async function getMerchantTransactions(
+  db: SQLite.SQLiteDatabase,
+  merchantName: string,
+  startDate: string,
+  endDate: string
+): Promise<ReceiptSummary[]> {
+  await initDatabase(db);
+  return getAllReceipts(db, {
+    startDate,
+    endDate,
+    merchantName: merchantName // We'll rely on the searchQuery or strict merchant filtering. 
+    // Actually getAllReceipts searchQuery uses LIKE on merchant_name OR items.
+  });
+}
+
+
+export async function getBiggestExpenses(
+  db: SQLite.SQLiteDatabase,
+  startDate: string,
+  endDate: string,
+  limit: number = 5
+): Promise<ReceiptSummary[]> {
+  await initDatabase(db);
+  const rows = await db.getAllAsync<any>(`
+    SELECT 
+      r.id,
+      r.merchant_name,
+      r.total_amount,
+      r.purchase_date,
+      r.source_type,
+      r.image_uri,
+      (SELECT COUNT(id) FROM receipt_items WHERE receipt_id = r.id) as item_count,
+      GROUP_CONCAT(ri.category) as categories
+    FROM receipts r
+    LEFT JOIN receipt_items ri ON r.id = ri.receipt_id
+    WHERE r.purchase_date >= ? AND r.purchase_date <= ?
+    GROUP BY r.id
+    ORDER BY r.total_amount DESC
+    LIMIT ?
+  `, [startDate, endDate, limit]);
+
+  return rows.map(row => {
+    const cats = row.categories ? row.categories.split(',') : [];
+    return {
+      id: row.id,
+      merchantName: row.merchant_name,
+      totalAmount: row.total_amount,
+      purchaseDate: row.purchase_date,
+      itemCount: row.item_count,
+      sourceType: row.source_type,
+      imageUri: row.image_uri,
+      categories: Array.from(new Set(cats))
+    } as ReceiptSummary;
+  });
 }
