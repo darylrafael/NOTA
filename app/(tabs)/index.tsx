@@ -133,7 +133,7 @@ function ExpandableBillRow({ bill }: { bill: UpcomingBill }) {
             <Ionicons name={getCategoryMeta(bill.rule.category).icon as any} size={18} color={bill.isPaid ? colors.textSecondary : colors.primary} />
           </View>
           <View style={{ flex: 1, paddingRight: 8 }}>
-            <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.textPrimary }} numberOfLines={1}>{bill.rule.name}</Text>
+            <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.textPrimary }} numberOfLines={1}>{normalizeMerchantName(bill.rule.name)}</Text>
             <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: bill.isPaid ? colors.success : isOverdue ? colors.error : isToday ? colors.warning : colors.textSecondary, marginTop: 2 }}>
                 {(() => {
                   if (bill.isPaid) return 'PAID';
@@ -400,8 +400,8 @@ export default function HomeScreen() {
     <View style={styles.flex}>
       <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
       <FlatList
-        style={styles.flex}
-        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 90 }]}
+          style={styles.flex}
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 90 }]}
         data={filteredReceipts.slice(0, 5)}
         keyExtractor={(item) => item.id}
         refreshControl={
@@ -452,49 +452,7 @@ export default function HomeScreen() {
             </View>
 
             
-            {/* Upcoming Bills Section */}
-            {(() => {
-              const unpaidBills = upcomingBills.filter(b => !b.isPaid);
-              return !searchVisible && debouncedSearchQuery === '' && unpaidBills.length > 0 && (
-
-              <View style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: spacing.md, marginBottom: spacing.md }}>
-                  <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.textPrimary }}>
-                    Recurring Bills
-                  </Text>
-                  <TouchableOpacity onPress={() => router.push('/recurring')}>
-                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.accent }}>See All</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={{ paddingHorizontal: spacing.md, gap: spacing.sm }}>
-                  {unpaidBills.sort((a, b) => {
-                    const dA = new Date(a.dueDate).getTime();
-                    const dB = new Date(b.dueDate).getTime();
-                    const today = new Date();
-                    today.setHours(0,0,0,0);
-                    
-                    const score = (bill: typeof a) => {
-                      if (bill.isPaid) return 5;
-                      const d = new Date(bill.dueDate).getTime();
-                      if (d < today.getTime()) return 1; // Overdue
-                      if (d === today.getTime()) return 2; // Due today
-                      if (d <= today.getTime() + (1000 * 60 * 60 * 24 * 3)) return 3; // Due soon (within 3 days)
-                      return 4; // Upcoming
-                    };
-                    
-                    const sA = score(a);
-                    const sB = score(b);
-                    if (sA !== sB) return sA - sB;
-                    return dA - dB;
-                  }).slice(0, 3).map(bill => (
-                    <ExpandableBillRow key={bill.rule.id} bill={bill} />
-                  ))}
-                </View>
-              </View>
-              );
-            })()}
-
-              {/* Review Queue Card */}
+            {/* Review Queue Card */}
             {reviewQueueCount > 0 && !searchVisible && debouncedSearchQuery === '' && (
               <TouchableOpacity
                 style={styles.reviewQueueCard}
@@ -518,13 +476,18 @@ export default function HomeScreen() {
             {/* Modern Spending Card */}
             {(!searchVisible && debouncedSearchQuery === '' && totalReceipts > 0) ? (
               <View style={styles.modernCard}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <View>
-                    <Text style={styles.modernCardLabel}>
-                      {categoryFilter === 'All' ? 'TOTAL SPENT' : `${categoryFilter.toUpperCase()} SPEND`}
-                    </Text>
-                    <AnimatedNumber value={summaryTotal} formatter={formatRupiah} style={styles.modernCardAmount} />
-                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <View>
+                      <Text style={styles.modernCardLabel}>
+                        {categoryFilter === 'All' ? 'TOTAL SPENT' : `${categoryFilter.toUpperCase()} SPEND`}
+                      </Text>
+                      <AnimatedNumber value={summaryTotal} formatter={formatRupiah} style={styles.modernCardAmount} />
+                      {summaryTotal === 0 && (
+                        <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>
+                          No spending recorded this month.
+                        </Text>
+                      )}
+                    </View>
                   
                   <TouchableOpacity 
                     style={styles.timeFilterPill}
@@ -580,39 +543,6 @@ export default function HomeScreen() {
 
 
             
-              {/* Quick Actions Grid */}
-              {(!searchVisible && debouncedSearchQuery === '' && totalReceipts > 0) && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 32, marginBottom: 20, marginTop: 4 }}>
-                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/history')} activeOpacity={0.7}>
-                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="time" size={20} color={colors.primary} />
-                    </View>
-                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>History</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/recurring')} activeOpacity={0.7}>
-                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="repeat" size={20} color={colors.primary} />
-                    </View>
-                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Recurring</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/price-book')} activeOpacity={0.7}>
-                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="pricetag" size={20} color={colors.primary} />
-                    </View>
-                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Prices</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/budget')} activeOpacity={0.7}>
-                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="wallet" size={20} color={colors.primary} />
-                    </View>
-                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Budget</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
               {/* Horizontal Scrollable Category Chips (Mini) */}
             {debouncedSearchQuery === '' && totalReceipts > 0 && (
               <View style={styles.categoryFilterContainerMini}>
@@ -652,7 +582,90 @@ export default function HomeScreen() {
             )}
           </View>
         }
-        renderItem={({ item, index }) => {
+          ListFooterComponent={
+            searchQuery.trim().length === 0 ? (
+              <View style={{ paddingTop: spacing.xl, paddingBottom: insets.bottom + 100 }}>
+                {/* Upcoming Bills Section */}
+            {(() => {
+              const unpaidBills = upcomingBills.filter(b => !b.isPaid);
+              return !searchVisible && debouncedSearchQuery === '' && unpaidBills.length > 0 && (
+
+              <View style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: spacing.md, marginBottom: spacing.md }}>
+                  <Text style={{ fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.textPrimary }}>
+                    Recurring Bills
+                  </Text>
+                  <TouchableOpacity onPress={() => router.push('/recurring')}>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: colors.accent }}>See All</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={{ paddingHorizontal: spacing.md, gap: spacing.sm }}>
+                  {unpaidBills.sort((a, b) => {
+                    const dA = new Date(a.dueDate).getTime();
+                    const dB = new Date(b.dueDate).getTime();
+                    const today = new Date();
+                    today.setHours(0,0,0,0);
+                    
+                    const score = (bill: typeof a) => {
+                      if (bill.isPaid) return 5;
+                      const d = new Date(bill.dueDate).getTime();
+                      if (d < today.getTime()) return 1; // Overdue
+                      if (d === today.getTime()) return 2; // Due today
+                      if (d <= today.getTime() + (1000 * 60 * 60 * 24 * 3)) return 3; // Due soon (within 3 days)
+                      return 4; // Upcoming
+                    };
+                    
+                    const sA = score(a);
+                    const sB = score(b);
+                    if (sA !== sB) return sA - sB;
+                    return dA - dB;
+                  }).slice(0, 3).map(bill => (
+                    <ExpandableBillRow key={bill.rule.id} bill={bill} />
+                  ))}
+                </View>
+              </View>
+              );
+            })()}
+
+              
+                {/* Quick Actions Grid */}
+              {(!searchVisible && debouncedSearchQuery === '' && totalReceipts > 0) && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 32, marginBottom: 20, marginTop: 4 }}>
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/history')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="time" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>History</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/recurring')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="repeat" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Recurring</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/price-book')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="pricetag" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Prices</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={{ alignItems: 'center', gap: 6 }} onPress={() => router.push('/budget')} activeOpacity={0.7}>
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="wallet" size={20} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: colors.textSecondary }}>Budget</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              
+              </View>
+            ) : <View style={{ height: insets.bottom + 100 }} />
+          }
+          renderItem={({ item, index }) => {
           const primaryCategory = item.categories[0] || 'Other';
           const primaryMeta = getCategoryMeta(primaryCategory);
           const merchantDisplay = normalizeMerchantName(item.merchantName);
@@ -695,7 +708,9 @@ export default function HomeScreen() {
               <Text style={styles.emptyFilteredText}>
                 {searchQuery.trim().length > 0
                   ? `No transactions found for "${searchQuery.trim()}".`
-                  : "No transactions found for this filter."}
+                  : categoryFilter !== 'All' 
+                    ? `No ${categoryFilter} transactions this month.`
+                    : "No transactions yet."}
               </Text>
             </View>
           )

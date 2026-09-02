@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getRecurringRules, getRecurringSuggestions, addRecurringRule, updateRecurringRule, deleteRecurringRule, RecurringSuggestion } from '../../db/queries';
 import { RecurringRule } from '../../types/receipt';
-import { formatRupiah, toTitleCase } from '../../lib/format';
+import { formatRupiah, toTitleCase, normalizeMerchantName } from '../../lib/format';
 import { getCategoryMeta, CATEGORIES } from '../../constants/categories';
 import { colors, spacing, radius, typography } from '../../constants/theme';
 import Button from '../../components/Button';
@@ -80,7 +80,7 @@ export default function RecurringScreen() {
     const d = new Date(sug.lastDate);
     const dateNum = isNaN(d.getDate()) ? 1 : d.getDate();
     setEditingRule({
-      name: toTitleCase(sug.name),
+      name: normalizeMerchantName(sug.name),
       amount: sug.amount,
       category: sug.category,
       billing_date: dateNum,
@@ -151,8 +151,8 @@ export default function RecurringScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (rule.is_active) {
       Alert.alert(
-        `Pause ${toTitleCase(rule.name)}?`,
-        `Future ${toTitleCase(rule.name)} bills will no longer appear until you resume this rule.`,
+        `Pause ${normalizeMerchantName(rule.name)}?`,
+        `Future ${normalizeMerchantName(rule.name)} bills will no longer appear until you resume this rule.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Pause Rule', style: 'destructive', onPress: async () => {
@@ -163,7 +163,7 @@ export default function RecurringScreen() {
       );
     } else {
       Alert.alert(
-        `Resume ${toTitleCase(rule.name)}?`,
+        `Resume ${normalizeMerchantName(rule.name)}?`,
         `This rule will immediately start generating bills again.`,
         [
           { text: 'Cancel', style: 'cancel' },
@@ -213,7 +213,7 @@ export default function RecurringScreen() {
 
   const renderRule = ({ item }: { item: RecurringRule }) => {
     const meta = getCategoryMeta(item.category);
-    const titleCaseName = toTitleCase(item.name);
+    const titleCaseName = normalizeMerchantName(item.name);
     return (
       <View style={styles.card}>
         <View style={[styles.iconBox, { backgroundColor: meta.color + '15' }]}>
@@ -222,7 +222,7 @@ export default function RecurringScreen() {
         <TouchableOpacity style={styles.cardContent} onPress={() => handleEdit(item)}>
           <Text style={[styles.cardTitle, item.is_active === 0 && { color: colors.textTertiary, textDecorationLine: 'line-through' }]} numberOfLines={1}>{titleCaseName}</Text>
           <Text style={styles.cardSubtitle}>
-            {item.frequency === 'weekly' ? 'Weekly' : item.frequency === 'yearly' ? 'Yearly' : 'Monthly'} {'\u00B7'} {formatDisplayDate(item)}
+            {item.frequency === 'weekly' ? 'Weekly' : item.frequency === 'yearly' ? 'Yearly' : 'Monthly'} {'\u2022'} {formatDisplayDate(item)}
             {(() => {
               if (!item.last_paid_date) return '\nNo payment recorded yet';
               const d = new Date(item.last_paid_date);
@@ -252,7 +252,7 @@ export default function RecurringScreen() {
 
   const renderSuggestion = ({ item }: { item: RecurringSuggestion }) => {
     const meta = getCategoryMeta(item.category);
-    const titleCaseName = toTitleCase(item.name);
+    const titleCaseName = normalizeMerchantName(item.name);
     
     // Calculate approximate days apart
     let contextText = `Detected ${item.occurrences} times`;
@@ -266,8 +266,8 @@ export default function RecurringScreen() {
     }
 
     return (
-      <View style={styles.card}>
-        <View style={[styles.iconBox, { backgroundColor: meta.color + '15', alignSelf: 'flex-start' }]}>
+        <View style={[styles.card, { backgroundColor: '#F8FAFC', borderColor: 'transparent', marginBottom: spacing.xs }]}>
+          <View style={[styles.iconBox, { backgroundColor: meta.color + '15', alignSelf: 'flex-start' }]}>
             <Ionicons name="sparkles" size={20} color={meta.color} />
           </View>
           <View style={styles.cardContent}>
@@ -292,13 +292,13 @@ export default function RecurringScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ title: 'Recurring Bills', headerShown: true, headerBackTitle: 'Back' }} />
-      <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.flex} contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 24) + 60 }]}>
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>Rules</Text>
             {rules.length > 0 && (
               <Text style={{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
-                {rules.filter(r => r.is_active).length} active {'\u00B7'} {formatRupiah(rules.filter(r => r.is_active).reduce((sum, r) => sum + r.amount, 0))}/month
+                {rules.filter(r => r.is_active).length} active {'\u2022'} {formatRupiah(rules.filter(r => r.is_active).reduce((sum, r) => sum + r.amount, 0))}/month
               </Text>
             )}
           </View>

@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  ActivityIndicator,
   Modal,
   FlatList,
   SafeAreaView
@@ -19,7 +18,6 @@ import {
   getMonthlyItemSpend, 
   getAllReceipts, 
   getTopMerchants, 
-  getBiggestExpenses,
   TopMerchant, 
   ReceiptSummary, 
   ItemSpendRecord 
@@ -27,9 +25,7 @@ import {
 import { colors, typography, spacing, radius, shadow } from '../../constants/theme';
 import { formatRupiah, normalizeMerchantName } from '../../lib/format';
 import { getCategoryMeta } from '../../constants/categories';
-import TransactionCard from '../../components/TransactionCard';
 import { calculateForecast } from '../../lib/forecast';
-import AnimatedNumber from '../../components/AnimatedNumber';
 
 export default function InsightsScreen() {
   const router = useRouter();
@@ -50,7 +46,6 @@ export default function InsightsScreen() {
   const [receipts, setReceipts] = useState<ReceiptSummary[]>([]);
   const [itemSpends, setItemSpends] = useState<ItemSpendRecord[]>([]);
   const [topMerchants, setTopMerchants] = useState<TopMerchant[]>([]);
-  const [biggestExpenses, setBiggestExpenses] = useState<ReceiptSummary[]>([]);
   const [prevMonthTotal, setPrevMonthTotal] = useState(0);
 
   const loadData = useCallback(async () => {
@@ -72,9 +67,6 @@ export default function InsightsScreen() {
 
       const merchants = await getTopMerchants(db, startStr, endStr, merchantSort);
       setTopMerchants(merchants);
-
-      const bigExps = await getBiggestExpenses(db, startStr, endStr, 5);
-      setBiggestExpenses(bigExps);
 
       const prevStart = new Date(currentDate);
       prevStart.setMonth(prevStart.getMonth() - 1);
@@ -151,8 +143,14 @@ export default function InsightsScreen() {
     if (prevMonthTotal === 0 && totalSpent === 0) return '';
     const diff = totalSpent - prevMonthTotal;
     if (diff === 0) return `No change vs ${prevMonthLabel}`;
+    
     const pct = Math.round((Math.abs(diff) / prevMonthTotal) * 100);
     const arrow = diff > 0 ? '\u2191' : '\u2193';
+    
+    if (pct > 999 || prevMonthTotal < 50000) {
+       return `${arrow} ${formatRupiah(Math.abs(diff))} vs ${prevMonthLabel}`;
+    }
+    
     return `${arrow} ${formatRupiah(Math.abs(diff))} (${pct.toLocaleString('en-US')}%) vs ${prevMonthLabel}`;
   };
 
@@ -160,9 +158,9 @@ export default function InsightsScreen() {
     if (totalSpent === 0) return '';
     const topCat = categoryBreakdown[0];
     if (topCat && topCat.percentage > 35) {
-      return `Most of your spending went to ${topCat.category}. It accounted for ${topCat.percentage}% of your spending.`;
+      return `Most of your spending went to ${topCat.category} (${topCat.percentage}% of total expenses).`;
     }
-    if (topMerchants.length > 0 && topMerchants[0].visitCount >= 8) {
+    if (topMerchants.length > 0 && topMerchants[0].visitCount >= 5) {
       return `You visited ${normalizeMerchantName(topMerchants[0].merchantName)} ${topMerchants[0].visitCount} times this month.`;
     }
     const diff = totalSpent - prevMonthTotal;
@@ -170,13 +168,11 @@ export default function InsightsScreen() {
       const pct = Math.round((Math.abs(diff) / prevMonthTotal) * 100);
       if (pct > 20) return `Your spending increased ${pct}% compared with ${prevMonthLabel}.`;
     }
-    if (biggestExpenses.length > 0) {
-      return `Your largest single expense was ${formatRupiah(biggestExpenses[0].totalAmount)} at ${normalizeMerchantName(biggestExpenses[0].merchantName)}.`;
-    }
     if (topMerchants.length > 0) {
-      return `${normalizeMerchantName(topMerchants[0].merchantName)} was your highest expense, taking up ${Math.round((topMerchants[0].totalAmount/totalSpent)*100)}% of your spending.`;
+      const pct = Math.round((topMerchants[0].totalAmount / totalSpent) * 100);
+      return `${normalizeMerchantName(topMerchants[0].merchantName)} was your largest merchant expense (${pct}% of spending).`;
     }
-    return "You're pacing well this month.";
+    return 'Your spending is pacing steadily this month.';
   };
 
   const renderMonthPicker = () => {
@@ -233,6 +229,7 @@ export default function InsightsScreen() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowMonthPicker(true)} style={styles.monthLabelBtn} hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}>
               <Text style={styles.monthLabel}>{monthLabel}</Text>
+              <Ionicons name="chevron-down" size={13} color={colors.textTertiary} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
             <TouchableOpacity onPress={handleNextMonth} disabled={isFutureMonth} style={[styles.navArrow, isFutureMonth && { opacity: 0.3 }]} hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}>
               <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
@@ -242,7 +239,7 @@ export default function InsightsScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 120 }} showsVerticalScrollIndicator={false}>
         
         {isCurrentMonth && prevMonthTotal > 0 && (
           <View style={styles.reviewCardContainer}>
@@ -255,37 +252,47 @@ export default function InsightsScreen() {
                 <Text style={styles.reviewTitle}>{prevMonthLabel} in Review</Text>
                 <Text style={styles.reviewSub}>See where your money went last month</Text>
               </View>
-              <Ionicons name="arrow-forward" size={18} color={colors.textSecondary} style={{ marginLeft: 16 }} />
+              <Ionicons name="arrow-forward" size={16} color={colors.textSecondary} style={{ marginLeft: 16 }} />
             </TouchableOpacity>
           </View>
         )}
 
+        {/* Hero Section */}
         {totalSpent === 0 && !isLoading ? (
           <View style={styles.heroSection}>
-            <Text style={styles.heroPretitle}>{monthLabel.toUpperCase()}</Text>
-            <Text style={styles.heroTitle}>TOTAL SPENT</Text>
+            <Text style={styles.heroEyebrow}>TOTAL SPENT</Text>
             <Text style={styles.heroValue}>Rp0</Text>
-            <Text style={styles.heroSubMuted}>No spending yet</Text>
-            {prevMonthTotal > 0 && <Text style={styles.heroPrevMuted}>Your {prevMonthLabel} spending was {formatRupiah(prevMonthTotal)}.</Text>}
+            <View style={styles.heroMetaPill}>
+              <Text style={styles.heroMetaText}>0 transactions {'\u2022'} No spending yet</Text>
+            </View>
+            <Text style={styles.heroPrevMuted}>Your {monthLabel.split(' ')[0]} spending will appear here.</Text>
           </View>
         ) : (
           <View style={styles.heroSection}>
-            <Text style={styles.heroPretitle}>{monthLabel.toUpperCase()}</Text>
-            <Text style={styles.heroTitle}>TOTAL SPENT</Text>
+            <Text style={styles.heroEyebrow}>TOTAL SPENT</Text>
             <Text style={styles.heroValue}>{formatRupiah(totalSpent)}</Text>
-            {getMoMText() !== '' && <Text style={styles.heroMom}>{getMoMText()}</Text>}
-            <Text style={styles.heroSub}>{receipts.length} transaction{receipts.length !== 1 ? 's' : ''}</Text>
+            <View style={styles.heroMetaPill}>
+              <Text style={styles.heroMetaText}>
+                {getMoMText() !== '' ? `${getMoMText()}  \u2022  ` : ''}
+                {`${receipts.length} transaction${receipts.length !== 1 ? 's' : ''}`}
+              </Text>
+            </View>
           </View>
         )}
 
+        {/* Editorial Insight Card */}
         {totalSpent > 0 && (
           <View style={styles.insightSection}>
             <View style={styles.insightBox}>
+              <View style={styles.insightIconCircle}>
+                <Ionicons name="sparkles" size={14} color={colors.primary} />
+              </View>
               <Text style={styles.insightText}>{getInsightText()}</Text>
             </View>
           </View>
         )}
 
+        {/* Top Merchants Section */}
         {topMerchants.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
@@ -316,41 +323,28 @@ export default function InsightsScreen() {
                   onPress={() => router.push(`/merchant/${encodeURIComponent(m.merchantName)}?start=${currentDate.toISOString()}`)}
                   activeOpacity={0.7}
                 >
-                  <View style={styles.merchantRank}><Text style={styles.merchantRankText}>{idx + 1}</Text></View>
+                  <View style={styles.merchantRank}>
+                    <Text style={styles.merchantRankText}>{idx + 1}</Text>
+                  </View>
                   <View style={styles.merchantInfo}>
                     <Text style={styles.merchantName} numberOfLines={1}>{normalizeMerchantName(m.merchantName)}</Text>
-                    <Text style={styles.merchantSub}>{m.visitCount} transaction{m.visitCount !== 1 ? 's' : ''}</Text>
+                    <Text style={styles.merchantSub}>
+                      {merchantSort === 'frequency' 
+                        ? `${m.visitCount} visits  \u2022  Avg ${formatRupiah(Math.round(m.totalAmount / m.visitCount))}`
+                        : `${m.visitCount} transaction${m.visitCount !== 1 ? 's' : ''}`}
+                    </Text>
                   </View>
                   <View style={styles.merchantRight}>
                     <Text style={styles.merchantAmount}>{formatRupiah(m.totalAmount)}</Text>
+                    <Ionicons name="chevron-forward" size={13} color={colors.textTertiary} style={{ marginTop: 2 }} />
                   </View>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
         )}
-
-        {biggestExpenses.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Biggest Expenses</Text>
-            </View>
-            <View style={styles.biggestList}>
-              {biggestExpenses.map((exp, idx) => (
-                <TransactionCard
-                  key={exp.id}
-                  id={exp.id}
-                  merchantName={normalizeMerchantName(exp.merchantName)}
-                  dateDisplay={new Date(exp.purchaseDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()}
-                  primaryCategory={exp.categories[0] || 'Other'}
-                  totalAmount={exp.totalAmount}
-                  onPress={() => router.push(`/receipt/${exp.id}`)}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-
+        
+        {/* Categories Breakdown */}
         {categoryBreakdown.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
@@ -360,34 +354,42 @@ export default function InsightsScreen() {
               {categoryBreakdown.map(cat => {
                 const meta = getCategoryMeta(cat.category);
                 return (
-                  <View key={cat.category} style={styles.catRow}>
+                  <TouchableOpacity 
+                    key={cat.category} 
+                    style={styles.catRow}
+                    onPress={() => router.push(`/category/${encodeURIComponent(cat.category)}`)}
+                    activeOpacity={0.7}
+                  >
                     <View style={[styles.catIcon, { backgroundColor: meta.color + '15' }]}>
                       <Ionicons name={meta.icon as any} size={16} color={meta.color} />
                     </View>
                     <View style={styles.catInfo}>
-                      <Text style={styles.catName} numberOfLines={1}>{cat.category}</Text>
-                      <View style={styles.catBarTrack}>
-                        <View style={[styles.catBarFill, { width: `${cat.percentage}%`, backgroundColor: meta.color }]} />
+                      <View style={styles.catHeaderRow}>
+                        <Text style={styles.catName} numberOfLines={1}>{cat.category}</Text>
+                        <Text style={styles.catAmount}>{formatRupiah(cat.amount)}</Text>
+                      </View>
+                      <View style={styles.catProgressRow}>
+                        <View style={styles.catBarTrack}>
+                          <View style={[styles.catBarFill, { width: `${cat.percentage}%`, backgroundColor: meta.color }]} />
+                        </View>
+                        <Text style={styles.catPct}>{cat.percentage}%</Text>
                       </View>
                     </View>
-                    <View style={styles.catRight}>
-                      <Text style={styles.catAmount}>{formatRupiah(cat.amount)}</Text>
-                      <Text style={styles.catPct}>{cat.percentage}%</Text>
-                    </View>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
           </View>
         )}
 
+        {/* Forecast Section (Current month only) */}
         {isCurrentMonth && totalSpent > 0 && forecasts.length > 0 && (
-          <View style={[styles.section, { marginTop: spacing.md }]}>
+          <View style={[styles.section, { marginTop: spacing.sm }]}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Forecast</Text>
             </View>
             <View style={styles.forecastCard}>
-              <Text style={styles.forecastLabel}>Projected month-end</Text>
+              <Text style={styles.forecastLabel}>Projected month-end spending</Text>
               <Text style={styles.forecastHero}>{formatRupiah(forecasts.reduce((sum, f) => sum + (f.projectedEndOfMonth || 0), 0))}</Text>
             </View>
           </View>
@@ -405,97 +407,144 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.sm,
-    height: 56,
+    paddingVertical: spacing.xs,
+    height: 48,
   },
-  headerSide: { flex: 1, justifyContent: 'center' },
-  monthNav: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  headerSide: { flex: 1 },
+  monthNav: { flex: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   navArrow: { padding: spacing.xs },
-  monthLabelBtn: { paddingHorizontal: 16 },
+  monthLabelBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 },
   monthLabel: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.textPrimary },
   
   reviewCardContainer: {
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   reviewCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.surface,
-    padding: spacing.md,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 14,
     borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card
   },
   reviewTitle: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: colors.textPrimary, marginBottom: 2 },
-  reviewSub: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.textSecondary },
+  reviewSub: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: colors.textSecondary },
 
   heroSection: {
     alignItems: 'center',
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.xl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
+    paddingHorizontal: spacing.xl,
   },
-  heroPretitle: { fontFamily: 'Manrope_700Bold', fontSize: 11, color: colors.textTertiary, letterSpacing: 1, marginBottom: 8 },
-  heroTitle: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.textSecondary, letterSpacing: 0.5, marginBottom: 6 },
-  heroValue: { ...typography.numberHero, fontSize: 36, marginBottom: 12 },
-  heroMom: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.textPrimary, marginBottom: 4 },
-  heroSub: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.textTertiary },
-  heroSubMuted: { fontFamily: 'Manrope_500Medium', fontSize: 14, color: colors.textTertiary, marginBottom: 8 },
-  heroPrevMuted: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: colors.textSecondary },
+  heroEyebrow: { 
+    fontFamily: 'Manrope_700Bold', 
+    fontSize: 11, 
+    color: colors.textTertiary, 
+    letterSpacing: 1.2, 
+    textTransform: 'uppercase',
+    marginBottom: 8 
+  },
+  heroValue: { 
+    ...typography.numberHero, 
+    fontSize: 36, 
+    letterSpacing: -0.5,
+    marginBottom: 10 
+  },
+  heroMetaPill: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroMetaText: { 
+    fontFamily: 'Manrope_600SemiBold', 
+    fontSize: 13, 
+    color: colors.textSecondary 
+  },
+  heroPrevMuted: { 
+    fontFamily: 'Manrope_500Medium', 
+    fontSize: 13, 
+    color: colors.textTertiary, 
+    marginTop: 10 
+  },
 
   insightSection: {
     paddingHorizontal: spacing.xl,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
   insightBox: {
-    backgroundColor: colors.surface,
-    padding: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: colors.border,
   },
+  insightIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
   insightText: {
+    flex: 1,
     fontFamily: 'Manrope_500Medium',
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textPrimary,
-    lineHeight: 22,
-    textAlign: 'center',
+    lineHeight: 19,
   },
 
   section: {
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.xl,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   sectionTitle: {
-    ...typography.h3,
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 17,
+    color: colors.textPrimary,
+    letterSpacing: -0.2,
   },
   
   segmentControl: {
     flexDirection: 'row',
     backgroundColor: '#F1F5F9',
     borderRadius: radius.pill,
-    padding: 2,
+    padding: 3,
     marginHorizontal: spacing.xl,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   segmentBtn: {
     flex: 1,
-    paddingVertical: 8,
+    paddingVertical: 7,
     alignItems: 'center',
     borderRadius: radius.pill,
   },
   segmentBtnActive: {
-    backgroundColor: '#FFF',
-    ...shadow.card,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   segmentText: {
     fontFamily: 'Manrope_600SemiBold',
@@ -504,6 +553,7 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: colors.textPrimary,
+    fontFamily: 'Manrope_700Bold',
   },
 
   merchantsList: {
@@ -512,23 +562,49 @@ const styles = StyleSheet.create({
   merchantRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   merchantRank: {
-    width: 24, height: 24, borderRadius: 12, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginRight: 14,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  merchantRankText: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: colors.textSecondary },
-  merchantInfo: { flex: 1, marginRight: 16 },
-  merchantName: { ...typography.body, marginBottom: 2 },
-  merchantSub: { ...typography.caption, color: colors.textTertiary },
-  merchantRight: { alignItems: 'flex-end', minWidth: 80 },
-  merchantAmount: { ...typography.numberSecondary, fontSize: 14 },
-
-  biggestList: {
-    paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
+  merchantRankText: { 
+    fontFamily: 'Manrope_700Bold', 
+    fontSize: 11, 
+    color: colors.textSecondary 
+  },
+  merchantInfo: { 
+    flex: 1, 
+    marginRight: 12 
+  },
+  merchantName: { 
+    fontFamily: 'Manrope_700Bold', 
+    fontSize: 15, 
+    color: colors.textPrimary,
+    marginBottom: 2 
+  },
+  merchantSub: { 
+    fontFamily: 'Manrope_500Medium', 
+    fontSize: 12, 
+    color: colors.textTertiary 
+  },
+  merchantRight: { 
+    alignItems: 'center', 
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 4
+  },
+  merchantAmount: { 
+    fontFamily: 'Manrope_700Bold', 
+    fontSize: 15, 
+    color: colors.textPrimary 
   },
 
   categoriesList: {
@@ -537,36 +613,111 @@ const styles = StyleSheet.create({
   catRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   catIcon: {
-    width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 14,
+    width: 36, 
+    height: 36, 
+    borderRadius: 10, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginRight: 12,
   },
-  catInfo: { flex: 1, paddingRight: 20 },
-  catName: { ...typography.body, marginBottom: 8 },
-  catBarTrack: { height: 4, backgroundColor: '#F1F5F9', borderRadius: 2 },
-  catBarFill: { height: 4, borderRadius: 2 },
-  catRight: { alignItems: 'flex-end', width: 90 },
-  catAmount: { ...typography.numberSecondary, fontSize: 14, marginBottom: 2 },
-  catPct: { ...typography.caption, color: colors.textTertiary },
+  catInfo: { 
+    flex: 1,
+  },
+  catHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  catName: { 
+    fontFamily: 'Manrope_700Bold', 
+    fontSize: 15, 
+    color: colors.textPrimary 
+  },
+  catAmount: { 
+    fontFamily: 'Manrope_700Bold', 
+    fontSize: 15, 
+    color: colors.textPrimary 
+  },
+  catProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  catBarTrack: { 
+    flex: 1,
+    height: 5, 
+    backgroundColor: '#F1F5F9', 
+    borderRadius: 2.5,
+    overflow: 'hidden',
+    marginRight: 10,
+  },
+  catBarFill: { 
+    height: 5, 
+    borderRadius: 2.5 
+  },
+  catPct: { 
+    fontFamily: 'Manrope_600SemiBold', 
+    fontSize: 12, 
+    color: colors.textTertiary,
+    minWidth: 32,
+    textAlign: 'right',
+  },
 
   forecastCard: {
     marginHorizontal: spacing.xl,
-    backgroundColor: colors.surface,
+    backgroundColor: '#FFFFFF',
     padding: spacing.lg,
     borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
+    ...shadow.card
   },
-  forecastLabel: { ...typography.caption, color: colors.textSecondary, marginBottom: 8 },
-  forecastHero: { ...typography.numberHero, fontSize: 26, color: colors.primary },
+  forecastLabel: { 
+    fontFamily: 'Manrope_600SemiBold', 
+    fontSize: 12, 
+    color: colors.textSecondary, 
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5 
+  },
+  forecastHero: { 
+    fontFamily: 'Manrope_800ExtraBold', 
+    fontSize: 24, 
+    color: colors.primary 
+  },
   
-  pickerContainer: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '60%' },
-  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  pickerTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16 },
-  pickerItem: { padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB' },
-  pickerItemText: { fontFamily: 'Manrope_500Medium', fontSize: 15, textAlign: 'center', color: colors.textPrimary }
+  pickerContainer: { 
+    backgroundColor: '#FFF', 
+    borderTopLeftRadius: 20, 
+    borderTopRightRadius: 20, 
+    maxHeight: '60%' 
+  },
+  pickerHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    padding: 16, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#E5E7EB' 
+  },
+  pickerTitle: { 
+    fontFamily: 'Manrope_700Bold', 
+    fontSize: 16 
+  },
+  pickerItem: { 
+    padding: 16, 
+    borderBottomWidth: StyleSheet.hairlineWidth, 
+    borderBottomColor: '#E5E7EB' 
+  },
+  pickerItemText: { 
+    fontFamily: 'Manrope_500Medium', 
+    fontSize: 15, 
+    textAlign: 'center', 
+    color: colors.textPrimary 
+  }
 });

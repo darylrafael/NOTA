@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,16 @@ export default function MonthlyReviewScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const db = useSQLiteContext();
+  const scrollRef = useRef<ScrollView>(null);
+
+
+
   const { month } = useLocalSearchParams<{ month: string }>(); // Expecting ISO string or YYYY-MM
+    useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ y: 0, animated: false });
+    }
+  }, [month]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [itemSpends, setItemSpends] = useState<ItemSpendRecord[]>([]);
@@ -114,8 +123,14 @@ export default function MonthlyReviewScreen() {
     if (prevMonthTotal === 0 && totalSpent === 0) return '';
     const diff = totalSpent - prevMonthTotal;
     if (diff === 0) return `No change vs ${prevMonthLabel}`;
+    
     const pct = Math.round((Math.abs(diff) / prevMonthTotal) * 100);
     const arrow = diff > 0 ? '\u2191' : '\u2193';
+    
+    if (pct > 999 || prevMonthTotal < 50000) {
+       return `${arrow} ${formatRupiah(Math.abs(diff))} vs ${prevMonthLabel}`;
+    }
+    
     return `${arrow} ${formatRupiah(Math.abs(diff))} (${pct.toLocaleString('en-US')}%) vs ${prevMonthLabel}`;
   };
 
@@ -136,7 +151,7 @@ export default function MonthlyReviewScreen() {
       {isLoading ? (
         <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 40 }} />
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 60, paddingHorizontal: spacing.xl }} showsVerticalScrollIndicator={false}>
+        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingBottom: insets.bottom + 100, paddingHorizontal: spacing.xl }} showsVerticalScrollIndicator={false}>
           
           <View style={styles.heroSection}>
             <Text style={styles.heroPretitle}>{monthLabel}</Text>
@@ -165,27 +180,27 @@ export default function MonthlyReviewScreen() {
           )}
 
           {topMerchantSpend && (
-            <View style={styles.insightBlock}>
+            <TouchableOpacity style={styles.insightBlock} onPress={() => router.push(`/merchant/${encodeURIComponent(topMerchantSpend.merchantName)}?start=${parsedDate.toISOString()}`)} activeOpacity={0.7}>
               <Text style={styles.insightLabel}>TOP MERCHANT</Text>
               <Text style={styles.insightValue}>{normalizeMerchantName(topMerchantSpend.merchantName)}</Text>
               <Text style={styles.insightSub}>{formatRupiah(topMerchantSpend.totalAmount)}</Text>
-            </View>
+            </TouchableOpacity>
           )}
 
           {topMerchantFreq && (
-            <View style={styles.insightBlock}>
+            <TouchableOpacity style={styles.insightBlock} onPress={() => router.push(`/merchant/${encodeURIComponent(topMerchantFreq.merchantName)}?start=${parsedDate.toISOString()}`)} activeOpacity={0.7}>
               <Text style={styles.insightLabel}>MOST FREQUENT</Text>
               <Text style={styles.insightValue}>{normalizeMerchantName(topMerchantFreq.merchantName)}</Text>
               <Text style={styles.insightSub}>{topMerchantFreq.visitCount} transactions</Text>
-            </View>
+            </TouchableOpacity>
           )}
 
           {biggestExpense && (
-            <View style={styles.insightBlock}>
+            <TouchableOpacity style={styles.insightBlock} onPress={() => router.push(`/receipt/${biggestExpense.id}`)} activeOpacity={0.7}>
               <Text style={styles.insightLabel}>BIGGEST EXPENSE</Text>
               <Text style={styles.insightValue}>{normalizeMerchantName(biggestExpense.merchantName)}</Text>
               <Text style={styles.insightSub}>{formatRupiah(biggestExpense.totalAmount)}</Text>
-            </View>
+            </TouchableOpacity>
           )}
 
           <View style={[styles.divider, { marginTop: spacing.lg }]} />
@@ -195,7 +210,7 @@ export default function MonthlyReviewScreen() {
             {categoryBreakdown.map(cat => (
               <View key={cat.category} style={styles.catRow}>
                 <Text style={styles.catName}>{cat.category}</Text>
-                <Text style={styles.catMeta}>{formatRupiah(cat.amount)} ? {cat.percentage}%</Text>
+                <Text style={styles.catMeta}>{formatRupiah(cat.amount)} {'\u2022'} {cat.percentage}%</Text>
               </View>
             ))}
           </View>

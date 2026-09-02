@@ -419,7 +419,7 @@ export default function ScanScreen() {
               </View>
               <Text style={styles.title}>Scan a receipt</Text>
               <Text style={styles.subtitle}>
-                Take a photo of a receipt or Indonesian payment proof. We extract the details ?" you review them before anything is saved.
+                Take a photo of a receipt or Indonesian payment proof. We extract the details ? you review them before anything is saved.
               </Text>
               <View style={styles.buttonGroup}>
                 <Button label="Open Camera" variant="primary" onPress={handleOpenCamera} style={styles.ctaButton} />
