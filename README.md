@@ -1,71 +1,110 @@
-# NOTA — AI Receipt Scanner
+<div align="center">
+  <img src="assets/icon.png" width="100" height="100" alt="NOTA Logo" />
+  <h1>NOTA</h1>
+  <p><strong>A minimal, local-first, iOS-native personal finance journal for Indonesia.</strong></p>
 
-NOTA is an AI-powered receipt scanner designed to quickly extract structured data (merchant, line items, prices, and taxes) from physical shopping receipts using computer vision and LLMs.
+  <p>
+    <a href="https://reactnative.dev/"><img src="https://img.shields.io/badge/React_Native-0.86-0F172A?logo=react" alt="React Native" /></a>
+    <a href="https://expo.dev/"><img src="https://img.shields.io/badge/Expo-SDK_57-000020?logo=expo" alt="Expo" /></a>
+    <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript" alt="TypeScript" /></a>
+    <a href="https://sqlite.org/"><img src="https://img.shields.io/badge/SQLite-Local_First-003B57?logo=sqlite" alt="SQLite" /></a>
+  </p>
+</div>
 
-This project serves as a demonstration of **portfolio-grade product engineering**, focusing on local-first data storage, server-side credential isolation, observability, and robust UI/UX.
+<br />
 
-## 🚀 The Product
+<p align="center">
+  <img src="docs/assets/demo1.jpeg" width="260" style="border-radius: 20px; margin: 0 10px;" />
+  <img src="docs/assets/demo2.jpeg" width="260" style="border-radius: 20px; margin: 0 10px;" />
+  <img src="docs/assets/demo3.jpeg" width="260" style="border-radius: 20px; margin: 0 10px;" />
+</p>
 
-NOTA provides fast, local-first personal expense tracking with server-side protection for the AI integration. NOTA intentionally avoids mandatory account creation to minimize onboarding friction.
+## ? Why NOTA?
+Most finance apps are essentially noisy spreadsheets crammed with charts, gamification, and anxiety-inducing alerts. **NOTA is different.** It was engineered from the ground up to be a **calm financial journal**. 
 
-### Key Workflows
-1. **Capture**: Take a photo or upload from the gallery.
-2. **Process**: Image is downscaled locally and sent to the AI proxy.
-3. **Extract**: Gemini extracts structured JSON.
-4. **Validate**: Client validates data types and handles missing fields.
-5. **Review & Edit**: User confirms or corrects items via the confirmation form.
-6. **Save**: Persists to a local SQLite database.
+By leveraging a 100% **Local-First SQLite** architecture, the app responds instantly. No loading spinners, no waiting for cloud syncs.
 
-## 🏗 Architecture
+### Core Features
+- ? **Lightning Fast (Local-First):** Data lives on your device. Instant state updates and offline capability.
+- ?? **Typography-Led Design:** Custom iOS-native feel, Apple Card-inspired margins, and carefully crafted visual hierarchy. Zero generic UI libraries were used.
+- ?? **Smart Insights & Forecast:** "Weekly Pulse" summaries, month-in-review editorial reports, and predictive spending forecasts.
+- ?? **Subscription & Bills Tracker:** Keep tabs on recurring utility bills and upcoming subscriptions effortlessly.
+- ???? **Tailored for Indonesia:** Designed specifically for IDR currency rules and local merchant patterns (e.g., Tokopedia, Gojek, Listrik).
 
-To protect the AI API key while maintaining a frictionless user experience (no login required), the architecture is split into a React Native client and a Node/Express Backend-For-Frontend (BFF).
+---
 
-```
-┌────────────────────┐          ┌────────────────────┐          ┌────────────────────┐
-│    Mobile App      │          │     BFF Proxy      │          │     Gemini API     │
-│ (React Native)     │ ───────▶ │ (Node / Express)   │ ───────▶ │ (2.5 Flash Model)  │
-│ - Image compression│  JSON    │ - Rate Limiting    │  JSON    │ - Vision OCR       │
-│ - Local SQLite DB  │          │ - Device Quotas    │          │ - Structured JSON  │
-│ - UI/UX            │ ◀─────── │ - API Key Secret   │ ◀─────── │                    │
-└────────────────────┘          └────────────────────┘          └────────────────────┘
-```
+## ?? Tech Stack
 
-## 🔐 Security Model
+NOTA is a showcase of modern, pragmatic frontend engineering:
 
-Because the mobile client does not require user authentication, **the client is treated as completely untrusted**. 
-1. **Zero Client Secrets**: The Gemini API key is *never* bundled in the mobile app. It exists exclusively on the proxy server.
-2. **Abuse Prevention vs Auth**: We mitigate abuse via rate limiting. The app generates an anonymous `device_id` (an abuse-control signal, not a secure identity). The server enforces quotas per device (50 scans/day) and rate limits per IP (20 req / 15 mins).
-3. **Payload Limits**: The proxy strictly drops requests over 2MB to prevent memory exhaustion attacks.
+- **Framework:** [React Native](https://reactnative.dev/) & [Expo](https://expo.dev/) (SDK 57)
+- **Language:** [TypeScript](https://www.typescriptlang.org/)
+- **Database:** expo-sqlite (Raw SQL queries for maximum performance and deterministic math)
+- **Routing:** Expo Router (File-based navigation)
+- **Styling:** React Native StyleSheet (Strictly maintained design tokens, no bloated Tailwind/UI libs)
 
-## ⚡ Performance Optimization
+---
 
-Sending full-resolution smartphone photos (5MB+) to an LLM over cellular networks is slow and wastes bandwidth. 
-* **Client-Side Image Manipulation**: NOTA resizes images to a maximum width of 1024px with 0.7 JPEG compression *before* uploading. 
-* **Result**: In the tested sample, image preprocessing reduced payload size from approximately 760KB to approximately 55KB, significantly reducing upload latency.
+## ?? Getting Started
 
-## 🧪 Testing & Observability
+Follow these steps to run NOTA locally on your machine.
 
-- **Structured Logging**: The BFF emits structured JSON logs (Request ID, IP, Device ID, Latency).
-- **Integration Tests**: Tests verify the proxy server's boundaries (payload rejection, missing auth, rate limit triggers).
-- **Security Audits**: The client build process includes an automated static production-bundle inspection script (`scripts/verify-bundle.js`) to verify that no API keys are leaked into the production bundle.
+### Prerequisites
+- Node.js (v18+)
+- Expo CLI
+- Expo Go app installed on your physical iOS device
 
-## 🛠 Engineering Decisions & Trade-offs
+### Installation
 
-For a detailed log of why certain technologies were chosen over others, please read [docs/DECISIONS.md](./docs/DECISIONS.md).
+1. **Clone the repository**
+   \\\ash
+   git clone https://github.com/darylrafael/NOTA.git
+   cd NOTA
+   \\\
 
-## Getting Started
+2. **Install dependencies**
+   *(Note: Using --legacy-peer-deps is recommended due to React Native 0.86 strict peer dependencies).*
+   \\\ash
+   npm install --legacy-peer-deps
+   \\\
 
-### 1. Start the Proxy Server
-\`\`\`bash
-cd server
-npm install
-npm run dev
-\`\`\`
-*Requires a `.env` file in the root directory with `GEMINI_API_KEY`.*
+3. **Start the development server**
+   \\\ash
+   npx expo start
+   \\\
 
-### 2. Start the Mobile App
-\`\`\`bash
-npm install
-npx expo start
-\`\`\`
-*Ensure your phone and computer are on the same Wi-Fi network. Scan the QR code with Expo Go.*
+4. **Run on Device**
+   Open the Camera app on your iPhone, scan the QR code presented in the terminal, and open it via **Expo Go**.
+
+---
+
+## ?? Seeding Demo Data
+
+Want to see the app fully populated with realistic dummy data (specifically tailored to the Tangerang/BSD/GS areas)? 
+
+1. Launch the app.
+2. Tap the **Settings** icon (top right on the Home screen).
+3. Scroll to **Data & Backup**.
+4. Tap **"Inject Demo Data"**.
+5. Restart or navigate to the Home screen to see the populated *Insights* and *History*.
+
+---
+
+## ?? Project Structure
+
+\\\ash
+NOTA/
++-- app/             # Expo Router screens (Home, Insights, Scan, Settings, Review)
++-- components/      # Reusable UI components (BottomSheet, Cards, Pills)
++-- constants/       # Centralized design tokens (colors, typography, spacing, categories)
++-- db/              # SQLite database schema, raw queries, and seeder scripts
++-- lib/             # Core business logic (deterministic math, date utilities, formatters)
++-- docs/            # Architecture reports, AI rules, and demo screenshots
++-- assets/          # Static application assets (icons, splash screens, fonts)
+\\\
+
+---
+
+## ?? License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
