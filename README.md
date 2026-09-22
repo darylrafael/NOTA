@@ -1,110 +1,124 @@
-<div align="center">
-  <img src="assets/icon.png" width="100" height="100" alt="NOTA Logo" />
-  <h1>NOTA</h1>
-  <p><strong>A minimal, local-first, iOS-native personal finance journal for Indonesia.</strong></p>
+﻿# NOTA — Personal Finance Journal
 
-  <p>
-    <a href="https://reactnative.dev/"><img src="https://img.shields.io/badge/React_Native-0.86-0F172A?logo=react" alt="React Native" /></a>
-    <a href="https://expo.dev/"><img src="https://img.shields.io/badge/Expo-SDK_57-000020?logo=expo" alt="Expo" /></a>
-    <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript" alt="TypeScript" /></a>
-    <a href="https://sqlite.org/"><img src="https://img.shields.io/badge/SQLite-Local_First-003B57?logo=sqlite" alt="SQLite" /></a>
-  </p>
-</div>
+> A minimal, local-first personal finance app for Indonesia. Scan receipts, track spending, and see where your money actually goes — without the noise.
 
-<br />
-
-<p align="center">
-  <img src="docs/assets/demo1.jpeg" width="260" style="border-radius: 20px; margin: 0 10px;" />
-  <img src="docs/assets/demo2.jpeg" width="260" style="border-radius: 20px; margin: 0 10px;" />
-  <img src="docs/assets/demo3.jpeg" width="260" style="border-radius: 20px; margin: 0 10px;" />
-</p>
-
-## ? Why NOTA?
-Most finance apps are essentially noisy spreadsheets crammed with charts, gamification, and anxiety-inducing alerts. **NOTA is different.** It was engineered from the ground up to be a **calm financial journal**. 
-
-By leveraging a 100% **Local-First SQLite** architecture, the app responds instantly. No loading spinners, no waiting for cloud syncs.
-
-### Core Features
-- ? **Lightning Fast (Local-First):** Data lives on your device. Instant state updates and offline capability.
-- ?? **Typography-Led Design:** Custom iOS-native feel, Apple Card-inspired margins, and carefully crafted visual hierarchy. Zero generic UI libraries were used.
-- ?? **Smart Insights & Forecast:** "Weekly Pulse" summaries, month-in-review editorial reports, and predictive spending forecasts.
-- ?? **Subscription & Bills Tracker:** Keep tabs on recurring utility bills and upcoming subscriptions effortlessly.
-- ???? **Tailored for Indonesia:** Designed specifically for IDR currency rules and local merchant patterns (e.g., Tokopedia, Gojek, Listrik).
+![React Native](https://img.shields.io/badge/React_Native-0.76-0F172A?style=flat-square&logo=react&logoColor=white)
+![Expo SDK](https://img.shields.io/badge/Expo-SDK_57-000020?style=flat-square&logo=expo&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-iOS-000000?style=flat-square&logo=apple&logoColor=white)
 
 ---
 
-## ?? Tech Stack
+## Screenshots
 
-NOTA is a showcase of modern, pragmatic frontend engineering:
-
-- **Framework:** [React Native](https://reactnative.dev/) & [Expo](https://expo.dev/) (SDK 57)
-- **Language:** [TypeScript](https://www.typescriptlang.org/)
-- **Database:** expo-sqlite (Raw SQL queries for maximum performance and deterministic math)
-- **Routing:** Expo Router (File-based navigation)
-- **Styling:** React Native StyleSheet (Strictly maintained design tokens, no bloated Tailwind/UI libs)
+| Onboarding | Home | Receipt Scan | Forecast |
+|:---:|:---:|:---:|:---:|
+| ![Snap your receipt](docs/assets/screen-onboarding-snap.jpeg) | ![Home overview](docs/assets/screen-home.jpeg) | ![AI scanning](docs/assets/screen-scan-loading.jpeg) | ![Forecast](docs/assets/screen-forecast.jpeg) |
 
 ---
 
-## ?? Getting Started
+## Overview
 
-Follow these steps to run NOTA locally on your machine.
+NOTA is built around one idea: **tracking your money should take less time than spending it.**
+
+Most finance apps make you fill out forms. NOTA lets you point your camera at a receipt and it handles the rest — extracting merchant, items, amounts, and categories automatically using AI vision. Everything is stored locally on-device. No accounts, no cloud sync, no subscriptions.
+
+---
+
+## Features
+
+**Receipt Scanner**
+Point your camera at any Indonesian receipt. NOTA extracts every line item using AI, lets you review and correct before saving.
+
+**Smart Categorization**
+Transactions are automatically categorized (Food & Drink, Transport, Groceries, Bills, etc.) and can be corrected with a single tap.
+
+**Monthly Forecast**
+Based on your spending history, NOTA projects where you will end up at the end of the month per category.
+
+**Budget Tracker**
+Set monthly spending limits per category. See your progress without any charts or dashboards cluttering the view.
+
+**Weekly Pulse**
+A weekly editorial summary of what happened to your money. Calm, non-judgmental, and contextual.
+
+**Bill & Subscription Tracker**
+Log recurring expenses and get reminded when they are coming up.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | React Native + Expo SDK 57 |
+| Language | TypeScript (strict mode) |
+| Routing | Expo Router (file-based) |
+| Database | `expo-sqlite` — 100% local, raw SQL |
+| AI Vision | External vision API (receipt extraction) |
+| Styling | React Native `StyleSheet` — zero UI libraries |
+
+**Why local-first SQLite?**
+The entire financial data pipeline runs on raw SQL queries — no ORM, no abstraction. This gives deterministic math (no floating point errors on Rupiah calculations), instant load times, and full offline support.
+
+---
+
+## Getting Started
 
 ### Prerequisites
-- Node.js (v18+)
-- Expo CLI
-- Expo Go app installed on your physical iOS device
+
+- Node.js 18+
+- [Expo Go](https://expo.dev/go) installed on your iPhone
 
 ### Installation
 
-1. **Clone the repository**
-   \\\ash
-   git clone https://github.com/darylrafael/NOTA.git
-   cd NOTA
-   \\\
+```bash
+# Clone the repo
+git clone https://github.com/darylrafael/NOTA.git
+cd NOTA
 
-2. **Install dependencies**
-   *(Note: Using --legacy-peer-deps is recommended due to React Native 0.86 strict peer dependencies).*
-   \\\ash
-   npm install --legacy-peer-deps
-   \\\
+# Install dependencies
+# --legacy-peer-deps is required due to RN 0.76 strict peer resolution
+npm install --legacy-peer-deps
 
-3. **Start the development server**
-   \\\ash
-   npx expo start
-   \\\
+# Start the dev server
+npx expo start
+```
 
-4. **Run on Device**
-   Open the Camera app on your iPhone, scan the QR code presented in the terminal, and open it via **Expo Go**.
+Scan the QR code in your terminal with the iPhone Camera app, then open in Expo Go.
 
 ---
 
-## ?? Seeding Demo Data
+## Project Structure
 
-Want to see the app fully populated with realistic dummy data (specifically tailored to the Tangerang/BSD/GS areas)? 
-
-1. Launch the app.
-2. Tap the **Settings** icon (top right on the Home screen).
-3. Scroll to **Data & Backup**.
-4. Tap **"Inject Demo Data"**.
-5. Restart or navigate to the Home screen to see the populated *Insights* and *History*.
-
----
-
-## ?? Project Structure
-
-\\\ash
+```
 NOTA/
-+-- app/             # Expo Router screens (Home, Insights, Scan, Settings, Review)
-+-- components/      # Reusable UI components (BottomSheet, Cards, Pills)
-+-- constants/       # Centralized design tokens (colors, typography, spacing, categories)
-+-- db/              # SQLite database schema, raw queries, and seeder scripts
-+-- lib/             # Core business logic (deterministic math, date utilities, formatters)
-+-- docs/            # Architecture reports, AI rules, and demo screenshots
-+-- assets/          # Static application assets (icons, splash screens, fonts)
-\\\
+├── app/              # Expo Router screens
+│   ├── (tabs)/       # Tab navigator: Home, Scan, Forecast
+│   ├── receipt/      # Receipt detail view
+│   ├── review/       # Monthly review
+│   └── settings.tsx  # Settings & data export
+├── components/       # Reusable UI components
+├── constants/        # Design tokens: colors, spacing, typography
+├── db/               # SQLite schema, queries, seed scripts
+├── lib/              # Business logic: formatting, math, date utils
+├── types/            # Shared TypeScript types
+└── docs/             # Architecture docs and screenshots
+```
 
 ---
 
-## ?? License
+## Design Philosophy
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+NOTA's UI intentionally avoids generic component libraries. Every screen is built with React Native's `StyleSheet` API against a set of hand-crafted design tokens. The aesthetic is typography-led, whitespace-heavy, and inspired by Apple's own apps.
+
+- **Local-first** — data lives on your device, responses are instant
+- **Calm by default** — no badges, no anxiety-inducing dashboards
+- **Explainable math** — every number is traceable to raw SQL, no black boxes
+- **Built for Indonesia** — IDR formatting, local merchant patterns, Indonesian receipt structures
+
+---
+
+## License
+
+MIT
