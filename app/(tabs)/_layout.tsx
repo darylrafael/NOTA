@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Platform, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { colors, radius } from '../../constants/theme';
-function TabIcon({ name, focused, isScan = false, color }: { name: any; focused: boolean; isScan?: boolean; color: string }) {
+function TabIcon({ name, focused, isScan = false, color }: { name: any; focused: boolean; isScan?: boolean; color: any }) {
   
 
   return (
@@ -70,3 +70,4 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+

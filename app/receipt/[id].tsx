@@ -605,17 +605,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000000',
   },
-  viewerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    padding: spacing.md,
-    zIndex: 10,
-  },
-  viewerCloseBtn: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: radius.pill,
-    padding: 4,
-  },
+  viewerHeader: { position: 'absolute', top: 60, right: 24, zIndex: 50 },
+  viewerCloseBtn: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   viewerScroll: {
     flex: 1,
   },
@@ -646,3 +637,4 @@ const styles = StyleSheet.create({
     color: colors.error,
   }
 });
+

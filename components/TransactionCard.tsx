@@ -33,7 +33,7 @@ export default function TransactionCard({
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <View style={[styles.iconContainer, { backgroundColor: meta.color + '15' }]}>
+      <View style={[styles.iconContainer, { backgroundColor: meta.color + '20' }]}>
         <Ionicons name={meta.icon as any} size={20} color={meta.color} />
       </View>
 
@@ -125,3 +125,5 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
+
+

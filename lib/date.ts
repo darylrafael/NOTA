@@ -156,3 +156,22 @@ export function isInRange(purchaseDate: string, start: string, end: string): boo
   if (!normalized) return false;
   return normalized >= start && normalized < end;
 }
+
+export function getCurrentWeekRange(referenceDate: Date = new Date()): { start: string; end: string } {
+  const day = referenceDate.getDay();
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  const start = new Date(referenceDate);
+  start.setDate(referenceDate.getDate() - diffToMonday);
+  return { start: toDateOnly(start), end: toDateOnly(referenceDate) };
+}
+
+export function getPreviousWeekRange(referenceDate: Date = new Date()): { start: string; end: string } {
+  const day = referenceDate.getDay();
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  const prevSunday = new Date(referenceDate);
+  prevSunday.setDate(referenceDate.getDate() - diffToMonday - 1);
+  const prevMonday = new Date(prevSunday);
+  prevMonday.setDate(prevSunday.getDate() - 6);
+  return { start: toDateOnly(prevMonday), end: toDateOnly(prevSunday) };
+}
+

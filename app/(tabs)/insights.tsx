@@ -147,11 +147,15 @@ export default function InsightsScreen() {
     const pct = Math.round((Math.abs(diff) / prevMonthTotal) * 100);
     const arrow = diff > 0 ? '\u2191' : '\u2193';
     
-    if (pct > 999 || prevMonthTotal < 50000) {
-       return `${arrow} ${formatRupiah(Math.abs(diff))} vs ${prevMonthLabel}`;
+    if (pct > 50 && diff < 0 && totalSpent < (prevMonthTotal * 0.2)) {
+      return `${arrow} ${formatRupiah(Math.abs(diff))} vs ${prevMonthLabel}`;
     }
     
-    return `${arrow} ${formatRupiah(Math.abs(diff))} (${pct.toLocaleString('en-US')}%) vs ${prevMonthLabel}`;
+    if (pct > 999) {
+      return `${arrow} ${formatRupiah(Math.abs(diff))} vs ${prevMonthLabel}`;
+    }
+    
+    return `${arrow} ${formatRupiah(Math.abs(diff))} (${pct}%) vs ${prevMonthLabel}`;
   };
 
   const getInsightText = () => {
@@ -411,7 +415,7 @@ const styles = StyleSheet.create({
     height: 48,
   },
   headerSide: { flex: 1 },
-  monthNav: { flex: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  monthNav: { flex: 3, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   navArrow: { padding: spacing.xs },
   monthLabelBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 },
   monthLabel: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: colors.textPrimary },
@@ -482,10 +486,10 @@ const styles = StyleSheet.create({
   },
   insightBox: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -498,6 +502,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    marginTop: 2,
   },
   insightText: {
     flex: 1,
@@ -574,6 +579,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    alignSelf: 'flex-start',
+    marginTop: 2,
   },
   merchantRankText: { 
     fontFamily: 'Manrope_700Bold', 
@@ -647,18 +654,19 @@ const styles = StyleSheet.create({
   catProgressRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 4,
   },
   catBarTrack: { 
     flex: 1,
-    height: 5, 
+    height: 4, 
     backgroundColor: '#F1F5F9', 
-    borderRadius: 2.5,
+    borderRadius: 2,
     overflow: 'hidden',
     marginRight: 10,
   },
   catBarFill: { 
-    height: 5, 
-    borderRadius: 2.5 
+    height: 4, 
+    borderRadius: 2 
   },
   catPct: { 
     fontFamily: 'Manrope_600SemiBold', 
@@ -671,7 +679,8 @@ const styles = StyleSheet.create({
   forecastCard: {
     marginHorizontal: spacing.xl,
     backgroundColor: '#FFFFFF',
-    padding: spacing.lg,
+    paddingVertical: 16,
+    paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -680,9 +689,9 @@ const styles = StyleSheet.create({
   },
   forecastLabel: { 
     fontFamily: 'Manrope_600SemiBold', 
-    fontSize: 12, 
+    fontSize: 10, 
     color: colors.textSecondary, 
-    marginBottom: 6,
+    marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5 
   },

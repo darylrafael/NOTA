@@ -583,7 +583,7 @@ const styles = StyleSheet.create({
   previewButton: { flex: 1 },
   processingContainer: { flex: 1, backgroundColor: '#000' },
   processingThumbnail: { flex: 1, opacity: 0.35 },
-  processingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  processingOverlay: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   processingCard: {
     backgroundColor: 'rgba(15, 23, 42, 0.85)', // Dark Navy slightly transparent
     borderRadius: radius.md,
@@ -592,7 +592,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   elegantOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(15, 23, 42, 0.85)', // Dark, sleek frosted-like background
     justifyContent: 'center',
     alignItems: 'center',
@@ -628,4 +628,5 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.7)',
   },
 });
+
 

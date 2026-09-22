@@ -35,6 +35,8 @@ import AnimatedNumber from '../../components/AnimatedNumber';
 import TransactionCard from '../../components/TransactionCard';
 import BottomSheet from '../../components/BottomSheet';
 import * as Haptics from 'expo-haptics';
+import WeeklyPulseCard from '../../components/WeeklyPulseCard';
+import { generateWeeklyPulse, WeeklyPulseData } from '../../lib/weeklyPulse';
 
 type DateFilter = 'thisMonth' | 'lastMonth' | 'allTime';
 
@@ -231,6 +233,7 @@ export default function HomeScreen() {
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [weeklyPulse, setWeeklyPulse] = useState<WeeklyPulseData | null>(null);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -252,12 +255,13 @@ export default function HomeScreen() {
       };
 
       const now = new Date();
-      const [receiptData, spendData, countData, reviewData, billsData] = await Promise.all([
+      const [receiptData, spendData, countData, reviewData, billsData, pulseData] = await Promise.all([
         getAllReceipts(db, filters),
         getAllItemSpend(db),
         getTotalReceiptCount(db),
         getReceiptsNeedingReview(db),
-        getUpcomingBillsThisMonth(db, now.getFullYear(), now.getMonth())
+        getUpcomingBillsThisMonth(db, now.getFullYear(), now.getMonth()),
+        generateWeeklyPulse(db, now)
       ]);
       
       if (getIsActive()) {
@@ -266,6 +270,7 @@ export default function HomeScreen() {
         setTotalReceipts(countData);
         setReviewQueueCount(reviewData.length);
         setUpcomingBills(billsData || []);
+        setWeeklyPulse(pulseData);
         setIsLoading(false);
         setIsRefreshing(false);
       }
@@ -522,9 +527,10 @@ export default function HomeScreen() {
                               <View style={[styles.legendDot, { backgroundColor: item.meta.color }]} />
                               <Text style={styles.legendText} numberOfLines={1}>{item.category}</Text>
                             </View>
-                            <Text style={styles.legendAmount}>
-                              {pct}% {'\\u00B7'} {formatRupiah(item.amount)}
-                            </Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                <Text style={[styles.legendAmount, { width: 36, textAlign: 'right' }]}>{pct}%</Text>
+                                <Text style={[styles.legendAmount, { width: 85, textAlign: 'right', color: colors.textPrimary }]}>{formatRupiah(item.amount)}</Text>
+                              </View>
                             </TouchableOpacity>
                           );
                         })}
@@ -540,10 +546,12 @@ export default function HomeScreen() {
                 </View>
               )
             )}
+            {/* Weekly Pulse Card */}
+            {debouncedSearchQuery === '' && totalReceipts > 0 && weeklyPulse && (
+              <WeeklyPulseCard data={weeklyPulse} />
+            )}
 
-
-            
-              {/* Horizontal Scrollable Category Chips (Mini) */}
+            {/* Horizontal Scrollable Category Chips (Mini) */}
             {debouncedSearchQuery === '' && totalReceipts > 0 && (
               <View style={styles.categoryFilterContainerMini}>
                 <ScrollView
@@ -859,9 +867,7 @@ const styles = StyleSheet.create({
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
+    backgroundColor: '#F1F5F9',
     borderRadius: radius.pill,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -989,3 +995,13 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 });
+
+
+
+
+
+
+
+
+
+

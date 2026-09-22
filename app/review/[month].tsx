@@ -160,7 +160,7 @@ export default function MonthlyReviewScreen() {
             <View style={{ height: spacing.xl }} />
             
             <Text style={styles.heroValue}>{formatRupiah(totalSpent)}</Text>
-            <Text style={styles.heroSubMuted}>total spent</Text>
+            <Text style={styles.heroSubMuted}>Total Spent</Text>
             
             {getMoMText() !== '' && (
               <View style={styles.momBadge}>
@@ -171,13 +171,13 @@ export default function MonthlyReviewScreen() {
 
           <View style={styles.divider} />
 
-          {topCategory && (
-            <View style={styles.insightBlock}>
-              <Text style={styles.insightLabel}>MOST OF YOUR SPENDING</Text>
-              <Text style={styles.insightValue}>went to {topCategory.category}.</Text>
-              <Text style={styles.insightSub}>{topCategory.percentage}% of total spending</Text>
-            </View>
-          )}
+            {topCategory && (
+              <View style={styles.insightBlock}>
+                <Text style={styles.insightLabel}>TOP CATEGORY</Text>
+                <Text style={styles.insightValue}>{topCategory.category}</Text>
+                <Text style={styles.insightSub}>{formatRupiah(topCategory.amount)} ({topCategory.percentage}% of total)</Text>
+              </View>
+            )}
 
           {topMerchantSpend && (
             <TouchableOpacity style={styles.insightBlock} onPress={() => router.push(`/merchant/${encodeURIComponent(topMerchantSpend.merchantName)}?start=${parsedDate.toISOString()}`)} activeOpacity={0.7}>

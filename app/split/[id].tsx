@@ -729,7 +729,7 @@ const styles = StyleSheet.create({
   updateExpenseBtnText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: colors.primary },
 
   // Bottom Sheet
-  sheetOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheetOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.4)' },
   sheetContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 10 },
   sheetHandle: { width: 40, height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
   sheetTitle: { fontFamily: 'Manrope_800ExtraBold', fontSize: 18, color: '#0F172A', marginBottom: 16, textAlign: 'center' },
@@ -744,3 +744,4 @@ const styles = StyleSheet.create({
   sheetDoneBtn: { backgroundColor: colors.primary, borderRadius: radius.md, height: 50, justifyContent: 'center', alignItems: 'center' },
   sheetDoneBtnText: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: '#FFF' }
 });
+
