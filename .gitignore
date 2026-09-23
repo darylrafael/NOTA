@@ -41,3 +41,7 @@ yarn-error.*
 /android
 .env
 *.backup
+
+# Legacy folders
+server/
+.claude/
